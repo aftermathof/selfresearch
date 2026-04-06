@@ -52,7 +52,6 @@ class YahooDownloader:
                 tic,
                 start=self.start_date,
                 end=self.end_date,
-                proxy=proxy,
                 auto_adjust=auto_adjust,
             )
             if temp_df.columns.nlevels != 1:

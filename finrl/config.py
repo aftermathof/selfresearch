@@ -7,14 +7,14 @@ TENSORBOARD_LOG_DIR = "tensorboard_log"
 RESULTS_DIR = "results"
 
 # date format: '%Y-%m-%d'
-TRAIN_START_DATE = "2014-01-06"
-TRAIN_END_DATE = "2025-12-31"
+TRAIN_START_DATE = "2014-01-01"
+TRAIN_END_DATE = "2024-12-31"
 
-TEST_START_DATE = "2026-01-01"
-TEST_END_DATE = "2026-03-20"
+TEST_START_DATE = "2025-01-01"
+TEST_END_DATE = "2025-12-31"
 
-TRADE_START_DATE = "2026-01-01"
-TRADE_END_DATE = "2026-03-20"
+TRADE_START_DATE = "2025-01-01"
+TRADE_END_DATE = "2025-12-31"
 
 # stockstats technical indicator column names
 # check https://pypi.org/project/stockstats/ for different names
@@ -62,15 +62,15 @@ RLlib_PARAMS = {"lr": 5e-5, "train_batch_size": 500, "gamma": 0.99}
 
 # Possible time zones
 TIME_ZONE_SHANGHAI = "Asia/Shanghai"  # Hang Seng HSI, SSE, CSI
-TIME_ZONE_USEASTERN = "US/Eastern"  # Dow, Nasdaq, SP
-TIME_ZONE_PARIS = "Europe/Paris"  # CAC,
-TIME_ZONE_BERLIN = "Europe/Berlin"  # DAX, TECDAX, MDAX, SDAX
-TIME_ZONE_JAKARTA = "Asia/Jakarta"  # LQ45
-TIME_ZONE_SELFDEFINED = "xxx"  # If neither of the above is your time zone, you should define it, and set USE_TIME_ZONE_SELFDEFINED 1.
-USE_TIME_ZONE_SELFDEFINED = 0  # 0 (default) or 1 (use the self defined)
+# TIME_ZONE_USEASTERN = "US/Eastern"  # Dow, Nasdaq, SP
+# TIME_ZONE_PARIS = "Europe/Paris"  # CAC,
+# TIME_ZONE_BERLIN = "Europe/Berlin"  # DAX, TECDAX, MDAX, SDAX
+# TIME_ZONE_JAKARTA = "Asia/Jakarta"  # LQ45
+# TIME_ZONE_SELFDEFINED = "xxx"  # If neither of the above is your time zone, you should define it, and set USE_TIME_ZONE_SELFDEFINED 1.
+# USE_TIME_ZONE_SELFDEFINED = 0  # 0 (default) or 1 (use the self defined)
 
-# parameters for data sources
-ALPACA_API_KEY = "xxx"  # your ALPACA_API_KEY
-ALPACA_API_SECRET = "xxx"  # your ALPACA_API_SECRET
-ALPACA_API_BASE_URL = "https://paper-api.alpaca.markets"  # alpaca url
-BINANCE_BASE_URL = "https://data.binance.vision/"  # binance url
+# # parameters for data sources
+# ALPACA_API_KEY = "xxx"  # your ALPACA_API_KEY
+# ALPACA_API_SECRET = "xxx"  # your ALPACA_API_SECRET
+# ALPACA_API_BASE_URL = "https://paper-api.alpaca.markets"  # alpaca url
+# BINANCE_BASE_URL = "https://data.binance.vision/"  # binance url

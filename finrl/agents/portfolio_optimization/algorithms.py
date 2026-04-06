@@ -14,18 +14,72 @@ from .utils import PVM
 from .utils import ReplayBuffer
 from .utils import RLDataset
 
+try:
+    import swanlab
+    _SWANLAB_AVAILABLE = True
+except ImportError:
+    _SWANLAB_AVAILABLE = False
+
+
+def _swanlog(metrics: dict, step: int = None):
+    """SwanLab 未安装时静默跳过。"""
+    if _SWANLAB_AVAILABLE:
+        swanlab.log(metrics, step=step)
+
+
+def _calc_metrics(portfolio_values: list) -> dict:
+    """根据组合净值序列计算年化 Sharpe 和最大回撤。"""
+    arr = np.array(portfolio_values, dtype=float)
+
+    if len(arr) < 2:
+        return {"sharpe": 0.0, "max_drawdown": 0.0}
+
+    rets = np.diff(arr) / arr[:-1]
+    sharpe = float(rets.mean() / rets.std() * np.sqrt(252)) if rets.std() > 0 else 0.0
+    peak = np.maximum.accumulate(arr)
+    max_dd = float(((arr - peak) / peak).min())
+    return {"sharpe": sharpe, "max_drawdown": max_dd}
+
+
+def _get_action_memory(env):
+    """
+    兼容不同版本环境中的动作历史字段。
+    优先尝试:
+      1) env._asset_memory["actions"]
+      2) env._actions_memory / env._action_memory / ...
+    """
+    asset_memory = getattr(env, "_asset_memory", None)
+    if isinstance(asset_memory, dict):
+        actions = asset_memory.get("actions", None)
+        if actions is not None:
+            return actions
+
+    candidate_names = [
+        "_actions_memory",
+        "_action_memory",
+        "actions_memory",
+        "action_memory",
+    ]
+    for name in candidate_names:
+        if hasattr(env, name):
+            memory = getattr(env, name)
+            if memory is not None:
+                return memory
+
+    return []
+
 
 class PolicyGradient:
     """Class implementing policy gradient algorithm to train portfolio
     optimization agents.
 
     Note:
-        During testing, the agent is optimized through online learning.
-        The parameters of the policy is updated repeatedly after a constant
-        period of time. To disable it, set learning rate to 0.
+        During testing, the agent can be optimized through online learning.
+        To disable online learning, set learning rate to 0 or use a very
+        large online_training_period.
 
     Attributes:
-        train_env: Environment used to train the agent
+        train_env: Environment used to train the agent.
         train_policy: Policy used in training.
         test_env: Environment used to test the agent.
         test_policy: Policy after test online learning.
@@ -46,15 +100,15 @@ class PolicyGradient:
         """Initializes Policy Gradient for portfolio optimization.
 
         Args:
-          env: Training Environment.
+          env: Training environment.
           policy: Policy architecture to be used.
           policy_kwargs: Arguments to be used in the policy network.
           validation_env: Validation environment.
           batch_size: Batch size to train neural network.
-          lr: policy Neural network learning rate.
+          lr: Policy neural network learning rate.
           action_noise: Noise parameter (between 0 and 1) to be applied
             during training.
-          optimizer: Optimizer of neural network.
+          optimizer: Optimizer class of neural network.
           device: Device where neural network is run.
         """
         self.policy = policy
@@ -68,31 +122,22 @@ class PolicyGradient:
         self._setup_train(env, self.policy, self.batch_size, self.lr, self.optimizer)
 
     def _setup_train(self, env, policy, batch_size, lr, optimizer):
-        """Initializes algorithm before training.
-
-        Args:
-          env: environment.
-          policy: Policy architecture to be used.
-          batch_size: Batch size to train neural network.
-          lr: Policy neural network learning rate.
-          optimizer: Optimizer of neural network.
-        """
-        # environment
+        """Initializes algorithm before training."""
         self.train_env = env
 
-        # neural networks
         self.train_policy = policy(**self.policy_kwargs).to(self.device)
         self.train_optimizer = optimizer(self.train_policy.parameters(), lr=lr)
 
-        # replay buffer and portfolio vector memory
         self.train_batch_size = batch_size
         self.train_buffer = ReplayBuffer(capacity=batch_size)
         self.train_pvm = PVM(self.train_env.episode_length, env.portfolio_size)
 
-        # dataset and dataloader
         dataset = RLDataset(self.train_buffer)
         self.train_dataloader = DataLoader(
-            dataset=dataset, batch_size=batch_size, shuffle=False, pin_memory=True
+            dataset=dataset,
+            batch_size=batch_size,
+            shuffle=False,
+            pin_memory=True,
         )
 
     def train(self, episodes=100):
@@ -102,77 +147,119 @@ class PolicyGradient:
             episodes: Number of episodes to simulate.
         """
         for i in tqdm(range(1, episodes + 1)):
-            obs = self.train_env.reset()  # observation
-            self.train_pvm.reset()  # reset portfolio vector memory
+            obs = self.train_env.reset()
+            self.train_pvm.reset()
             done = False
+            episode_losses = []
 
             while not done:
-                # define last_action and action and update portfolio vector memory
                 last_action = self.train_pvm.retrieve()
                 obs_batch = np.expand_dims(obs, axis=0)
                 last_action_batch = np.expand_dims(last_action, axis=0)
+
                 action = apply_portfolio_noise(
-                    self.train_policy(obs_batch, last_action_batch), self.action_noise
+                    self.train_policy(obs_batch, last_action_batch),
+                    self.action_noise,
                 )
                 self.train_pvm.add(action)
 
-                # run simulation step
                 next_obs, reward, done, info = self.train_env.step(action)
-
-                # add experience to replay buffer
                 exp = (obs, last_action, info["price_variation"], info["trf_mu"])
                 self.train_buffer.append(exp)
 
-                # update policy networks
                 if len(self.train_buffer) == self.train_batch_size:
-                    self._gradient_ascent()
+                    loss_val = self._gradient_ascent()
+                    if loss_val is not None:
+                        episode_losses.append(loss_val)
 
                 obs = next_obs
 
-            # gradient ascent with episode remaining buffer data
-            self._gradient_ascent()
+            # episode 末尾剩余数据
+            loss_val = self._gradient_ascent()
+            if loss_val is not None:
+                episode_losses.append(loss_val)
 
-            # validation step
-            if self.validation_env:
-                self.test(self.validation_env)
+            # ── 训练集指标 ──────────────────────────────────────
+            train_vals = self.train_env._asset_memory["final"]
+            train_return = train_vals[-1] / train_vals[0]
+            train_stats = _calc_metrics(train_vals)
+
+            # 持仓集中度 & 换手率
+            actions_mem = _get_action_memory(self.train_env)
+            if len(actions_mem) > 1:
+                w = np.array(actions_mem, dtype=float)
+                if w.ndim == 2 and w.shape[1] > 1:
+                    max_weight = float(w[:, 1:].max(axis=1).mean())
+                    turnover = float(np.abs(np.diff(w, axis=0)).sum(axis=1).mean())
+                else:
+                    max_weight, turnover = 0.0, 0.0
+            else:
+                max_weight, turnover = 0.0, 0.0
+
+            metrics = {
+                "train/loss": float(np.mean(episode_losses)) if episode_losses else 0.0,
+                "train/return": float(train_return),
+                "train/sharpe": train_stats["sharpe"],
+                "train/max_drawdown": train_stats["max_drawdown"],
+                "train/max_weight": max_weight,
+                "train/turnover": turnover,
+            }
+
+            # ── 验证集指标 ──────────────────────────────────────
+            # 注意：这里关闭 online learning，避免污染验证集指标
+            if self.validation_env is not None:
+                self.test(
+                    self.validation_env,
+                    policy=None,
+                    online_training_period=10**18,
+                    batch_size=self.train_batch_size,
+                    lr=0.0,
+                    optimizer=None,
+                )
+
+                val_vals = self.validation_env._asset_memory["final"]
+                val_return = val_vals[-1] / val_vals[0]
+                val_stats = _calc_metrics(val_vals)
+                metrics.update({
+                    "val/return": float(val_return),
+                    "val/sharpe": val_stats["sharpe"],
+                    "val/max_drawdown": val_stats["max_drawdown"],
+                })
+
+            _swanlog(metrics, step=i)
 
     def _setup_test(self, env, policy, batch_size, lr, optimizer):
-        """Initializes algorithm before testing.
-
-        Args:
-          env: Environment.
-          policy: Policy architecture to be used.
-          batch_size: batch size to train neural network.
-          lr: policy neural network learning rate.
-          optimizer: Optimizer of neural network.
-        """
-        # environment
+        """Initializes algorithm before testing."""
         self.test_env = env
 
-        # process None arguments
         policy = self.train_policy if policy is None else policy
         lr = self.lr if lr is None else lr
         optimizer = self.optimizer if optimizer is None else optimizer
 
-        # neural networks
-        # define policy
         self.test_policy = copy.deepcopy(policy).to(self.device)
         self.test_optimizer = optimizer(self.test_policy.parameters(), lr=lr)
 
-        # replay buffer and portfolio vector memory
         self.test_buffer = ReplayBuffer(capacity=batch_size)
         self.test_pvm = PVM(self.test_env.episode_length, env.portfolio_size)
 
-        # dataset and dataloader
         dataset = RLDataset(self.test_buffer)
         self.test_dataloader = DataLoader(
-            dataset=dataset, batch_size=batch_size, shuffle=False, pin_memory=True
+            dataset=dataset,
+            batch_size=batch_size,
+            shuffle=False,
+            pin_memory=True,
         )
 
     def test(
-        self, env, policy=None, online_training_period=10, lr=None, optimizer=None
+        self,
+        env,
+        policy=None,
+        online_training_period=10,
+        batch_size=None,
+        lr=None,
+        optimizer=None,
     ):
-        """Tests the policy with online learning.
+        """Tests the policy with optional online learning.
 
         Args:
           env: Environment to be used in testing.
@@ -183,76 +270,78 @@ class PolicyGradient:
           batch_size: Batch size to train neural network. If None, it will use the
             training batch size.
           lr: Policy neural network learning rate. If None, it will use the training
-            learning rate
+            learning rate.
           optimizer: Optimizer of neural network. If None, it will use the training
-            optimizer
-
-        Note:
-            To disable online learning, set learning rate to 0 or a very big online
-            training period.
+            optimizer.
         """
-        self._setup_test(env, policy, online_training_period, lr, optimizer)
+        batch_size = self.train_batch_size if batch_size is None else batch_size
+        self._setup_test(env, policy, batch_size, lr, optimizer)
 
-        obs = self.test_env.reset()  # observation
-        self.test_pvm.reset()  # reset portfolio vector memory
+        obs = self.test_env.reset()
+        self.test_pvm.reset()
         done = False
         steps = 0
 
         while not done:
             steps += 1
-            # define last_action and action and update portfolio vector memory
+
             last_action = self.test_pvm.retrieve()
             obs_batch = np.expand_dims(obs, axis=0)
             last_action_batch = np.expand_dims(last_action, axis=0)
             action = self.test_policy(obs_batch, last_action_batch)
             self.test_pvm.add(action)
 
-            # run simulation step
             next_obs, reward, done, info = self.test_env.step(action)
 
-            # add experience to replay buffer
             exp = (obs, last_action, info["price_variation"], info["trf_mu"])
             self.test_buffer.append(exp)
 
-            # update policy networks
-            if steps % online_training_period == 0:
-                self._gradient_ascent(test=True)
+            # lr <= 0 时直接跳过 online learning
+            if lr is not None and lr <= 0:
+                pass
+            else:
+                if steps % online_training_period == 0:
+                    self._gradient_ascent(test=True)
 
             obs = next_obs
 
     def _gradient_ascent(self, test=False):
-        """Performs the gradient ascent step in the policy gradient algorithm.
+        """Performs the gradient ascent step in the policy gradient algorithm."""
+        if test:
+            if len(self.test_buffer) == 0:
+                return None
+        else:
+            if len(self.train_buffer) == 0:
+                return None
 
-        Args:
-            test: If true, it uses the test dataloader and policy.
-        """
-        # get batch data from dataloader
         obs, last_actions, price_variations, trf_mu = (
             next(iter(self.test_dataloader))
             if test
             else next(iter(self.train_dataloader))
         )
+
         obs = obs.to(self.device)
         last_actions = last_actions.to(self.device)
         price_variations = price_variations.to(self.device)
         trf_mu = trf_mu.unsqueeze(1).to(self.device)
 
-        # define policy loss (negative for gradient ascent)
         mu = (
             self.test_policy.mu(obs, last_actions)
             if test
             else self.train_policy.mu(obs, last_actions)
         )
+
         policy_loss = -torch.mean(
             torch.log(torch.sum(mu * price_variations * trf_mu, dim=1))
         )
 
-        # update policy network
         if test:
-            self.test_policy.zero_grad()
+            self.test_optimizer.zero_grad()
             policy_loss.backward()
             self.test_optimizer.step()
         else:
-            self.train_policy.zero_grad()
+            self.train_optimizer.zero_grad()
             policy_loss.backward()
             self.train_optimizer.step()
+
+        return policy_loss.item()
