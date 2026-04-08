@@ -33,6 +33,14 @@ FEATURES = [
     "open",
     "boll_ub",
     "boll_lb",
+    "vol_ratio20",
+    "r1",
+    "r5",
+    "r10",
+    "r20",
+    "intraday",
+    "overnight",
+    "range",
 ]
 
 SAVE_DIR = "./plots"
@@ -65,8 +73,8 @@ swanlab.init(
 # =========================
 # 2. 读数据
 # =========================
-train_df = pd.read_csv("train_data.csv")
-trade_df = pd.read_csv("trade_data.csv")
+train_df = pd.read_csv("train_data1.csv")
+trade_df = pd.read_csv("trade_data1.csv")
 
 use_cols = ["date", "tic"] + FEATURES
 train_df = train_df[use_cols].copy()
