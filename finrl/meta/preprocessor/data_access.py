@@ -30,7 +30,7 @@ INDICATORS = [
 try:
     from finrl.config_tickers import SSE50_20_TICKER as RAW_TICKER_LIST
 except Exception:
-    RAW_TICKER_LIST = ['601012.SS', '600030.SS', '603259.SS', '600887.SS', '600031.SS', '601318.SS', '601668.SS', '601688.SS', '600276.SS', '600703.SS', '600048.SS', '601166.SS', '600519.SS', '600036.SS', '601888.SS', '600196.SS']
+    RAW_TICKER_LIST = ['600009.SS', '601088.SS', '601236.SS', '600019.SS', '601818.SS', '601800.SS', '601111.SS', '601939.SS', '601628.SS', '601658.SS', '601006.SS', '601816.SS', '600606.SS', '601319.SS', '601229.SS']
 
 def to_yahoo_ticker(ticker: str) -> str:
     """
@@ -96,8 +96,8 @@ def save_splits(df_processed: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]
     train = data_split(df_processed, TRAIN_START_DATE, TRAIN_END_DATE)
     trade = data_split(df_processed, TRADE_START_DATE, TRADE_END_DATE)
 
-    train.to_csv("train_data.csv", index=False)
-    trade.to_csv("trade_data.csv", index=False)
+    train.to_csv("train_data1.csv", index=False)
+    trade.to_csv("trade_data1.csv", index=False)
 
     print(f"Train shape: {train.shape}")
     print(f"Trade shape: {trade.shape}")

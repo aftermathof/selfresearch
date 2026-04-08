@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import copy
 import numpy as np
 import pandas as pd
 import torch
@@ -20,9 +21,9 @@ import swanlab
 # =========================
 INITIAL_AMOUNT = 1_000_000
 TIME_WINDOW = 50
-EPISODES = 10
+EPISODES = 20
 LR = 1e-3
-BATCH_SIZE = 32
+BATCH_SIZE = 64
 COMISSION_FEE_PCT = 0.001
 
 FEATURES = [
@@ -32,11 +33,11 @@ FEATURES = [
     "open",
     "boll_ub",
     "boll_lb",
-    "close_30_sma",
 ]
 
 SAVE_DIR = "./plots"
 MODEL_PATH = "eiie_pg_policy.pth"
+BEST_MODEL_PATH = "eiie_pg_best.pth"
 os.makedirs(SAVE_DIR, exist_ok=True)
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -75,8 +76,10 @@ train_df["date"] = pd.to_datetime(train_df["date"]).dt.strftime("%Y-%m-%d")
 trade_df["date"] = pd.to_datetime(trade_df["date"]).dt.strftime("%Y-%m-%d")
 
 # 检查每个交易日股票池是否完整
-assert train_df.groupby("date")["tic"].nunique().min() == train_df["tic"].nunique()
-assert trade_df.groupby("date")["tic"].nunique().min() == trade_df["tic"].nunique()
+assert train_df.groupby("date")["tic"].nunique().min() == train_df["tic"].nunique(), \
+    "train_df 中存在某些日期股票池不完整"
+assert trade_df.groupby("date")["tic"].nunique().min() == trade_df["tic"].nunique(), \
+    "trade_df 中存在某些日期股票池不完整"
 
 
 # =========================
@@ -155,38 +158,7 @@ trade_env = make_env(trade_df)
 
 
 # =========================
-# 5. 建 agent 和 model
-# =========================
-agent = DRLAgent(env=train_env)
-
-model = agent.get_model(
-    model_name="pg",
-    device=device,
-    model_kwargs={
-        "lr": LR,
-        "batch_size": BATCH_SIZE,
-        "policy": EIIE,
-        "action_noise": 0.0,
-        "validation_env": val_env,   # 关键：传入验证环境
-    },
-    policy_kwargs={
-        "initial_features": len(FEATURES),
-        "time_window": TIME_WINDOW,
-    },
-)
-
-
-# =========================
-# 6. 训练
-# =========================
-trained_model = agent.train_model(model=model, episodes=EPISODES)
-
-torch.save(trained_model.train_policy.state_dict(), MODEL_PATH)
-print(f"模型已保存到 {MODEL_PATH}")
-
-
-# =========================
-# 7. 一些工具函数
+# 5. 工具函数（注意：必须放在训练循环前）
 # =========================
 def get_env_portfolio_curve(env) -> list[float]:
     """
@@ -359,6 +331,94 @@ def summarize_curve(name: str, curve: list[float]):
 
 
 # =========================
+# 6. 建 agent 和 model
+# =========================
+agent = DRLAgent(env=train_env)
+
+model = agent.get_model(
+    model_name="pg",
+    device=device,
+    model_kwargs={
+        "lr": LR,
+        "batch_size": BATCH_SIZE,
+        "policy": EIIE,
+        "action_noise": 0.05,
+        "validation_env": val_env,   # 若你的 finrl 版本不支持，可删掉这一行
+    },
+    policy_kwargs={
+        "initial_features": len(FEATURES),
+        "time_window": TIME_WINDOW,
+    },
+)
+
+
+# =========================
+# 7. 训练（逐episode + 最优checkpoint）
+# =========================
+best_val_value = -np.inf
+best_episode = -1
+best_state_dict = None
+
+trained_model = model
+
+for ep in range(EPISODES):
+    # 每次只训练 1 个 episode，并继续在上一次参数基础上训练
+    trained_model = agent.train_model(model=trained_model, episodes=1)
+
+    # 在验证集上评估
+    val_curve_ep, _ = run_drl_validation(val_df, trained_model)
+    val_final = float(val_curve_ep[-1])
+
+    is_best = val_final > best_val_value
+
+    if is_best:
+        best_val_value = val_final
+        best_episode = ep + 1
+        best_state_dict = copy.deepcopy(trained_model.train_policy.state_dict())
+
+        # 保存完整 checkpoint
+        torch.save(
+            {
+                "episode": best_episode,
+                "val_portfolio_value": best_val_value,
+                "policy_state_dict": best_state_dict,
+            },
+            BEST_MODEL_PATH,
+        )
+
+    swanlab.log({
+        "episode": ep + 1,
+        "val_portfolio_value": val_final,
+        "best_val_portfolio_value": best_val_value,
+    })
+
+    print(
+        f"Episode {ep + 1}/{EPISODES} | "
+        f"val_value={val_final:.2f} | "
+        f"best={best_val_value:.2f}"
+    )
+
+    if is_best:
+        print(f"  ✓ New best at episode {best_episode}, saved to {BEST_MODEL_PATH}")
+
+if best_state_dict is None:
+    raise RuntimeError("训练结束后没有得到有效的 best checkpoint，请检查训练过程。")
+
+print(
+    f"\n训练结束，最优 checkpoint 来自 episode {best_episode}，"
+    f"val_value={best_val_value:.2f}"
+)
+
+# 训练结束后，将最优参数加载回当前模型
+trained_model.train_policy.load_state_dict(best_state_dict)
+print("已将验证集最优参数加载回当前模型。")
+
+# 再单独保存一份纯策略参数
+torch.save(best_state_dict, MODEL_PATH)
+print(f"最终最优策略参数已保存到 {MODEL_PATH}")
+
+
+# =========================
 # 8. 训练集表现图：EIIE vs Buy-and-Hold
 # =========================
 train_bh_curve, train_bh_env = run_equal_weight_baseline(train_sub_df)
@@ -435,6 +495,9 @@ val_metrics = calc_metrics(val_drl_curve)
 trade_metrics = calc_metrics(trade_drl_curve)
 
 swanlab.log({
+    "best_episode": best_episode,
+    "best_val_portfolio_value": best_val_value,
+
     "train_bh_final_value": float(train_bh_curve[-1]),
     "train_drl_final_value": float(train_drl_curve[-1]),
     "val_bh_final_value": float(val_bh_curve[-1]),
@@ -454,16 +517,5 @@ swanlab.log({
     "trade_drl_sharpe": trade_metrics["sharpe"],
     "trade_drl_max_drawdown": trade_metrics["max_drawdown"],
 })
-
-print("=" * 60)
-print("All plots saved to:", SAVE_DIR)
-print("Saved files:")
-print("- train_performance.png")
-print("- train_actions.png")
-print("- val_performance.png")
-print("- val_actions.png")
-print("- trade_performance.png")
-print("- trade_actions.png")
-print("=" * 60)
 
 swanlab.finish()

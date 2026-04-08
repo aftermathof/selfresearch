@@ -80,8 +80,7 @@ class EIIE(nn.Module):
         last_action = last_action.to(self.device).float()
 
         last_stocks, cash_bias = self._process_last_action(last_action)
-        cash_bias = torch.zeros_like(cash_bias).to(self.device)
-
+        
         output = self.sequential(observation)  # shape [N, 20, PORTFOLIO_SIZE, 1]
         output = torch.cat(
             [last_stocks, output], dim=1
