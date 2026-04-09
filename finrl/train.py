@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import os
+import io
 import copy
+import contextlib
 import numpy as np
 import pandas as pd
 import torch
@@ -12,8 +14,7 @@ from finrl.meta.env_portfolio_optimization.env_portfolio_optimization import (
 )
 from finrl.agents.portfolio_optimization.models import DRLAgent
 from finrl.agents.portfolio_optimization.architectures import EIIE
-
-import swanlab
+import finrl.agents.portfolio_optimization.algorithms as algo_mod
 
 
 # =========================
@@ -21,7 +22,7 @@ import swanlab
 # =========================
 INITIAL_AMOUNT = 1_000_000
 TIME_WINDOW = 50
-EPISODES = 20
+EPISODES = 5
 LR = 1e-3
 BATCH_SIZE = 64
 COMISSION_FEE_PCT = 0.001
@@ -33,6 +34,12 @@ FEATURES = [
     "open",
     "boll_ub",
     "boll_lb",
+    "macd",
+    "rsi_30",
+    "cci_30",
+    "dx_30",
+    "close_30_sma",
+    "close_60_sma",
     "vol_ratio20",
     "r1",
     "r5",
@@ -45,161 +52,198 @@ FEATURES = [
 
 SAVE_DIR = "./plots"
 MODEL_PATH = "eiie_pg_policy.pth"
-BEST_MODEL_PATH = "eiie_pg_best.pth"
 os.makedirs(SAVE_DIR, exist_ok=True)
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
 
 # =========================
-# 1. SwanLab 初始化
+# 1. 关闭 tqdm 进度条
 # =========================
-swanlab.init(
-    project="sse50-portfolio",
-    experiment_name="EIIE-PG-train-val-trade",
-    mode="cloud",
-    config={
-        "lr": LR,
-        "batch_size": BATCH_SIZE,
-        "episodes": EPISODES,
-        "time_window": TIME_WINDOW,
-        "features": FEATURES,
-        "comission_fee_pct": COMISSION_FEE_PCT,
-        "device": device,
-    },
-)
+algo_mod.tqdm = lambda x: x
 
 
 # =========================
-# 2. 读数据
+# 2. 读已有数据
 # =========================
-train_df = pd.read_csv("train_data1.csv")
-trade_df = pd.read_csv("trade_data1.csv")
+train_df_raw = pd.read_csv("train_data1.csv")
+trade_df_raw = pd.read_csv("trade_data1.csv")
 
 use_cols = ["date", "tic"] + FEATURES
-train_df = train_df[use_cols].copy()
-trade_df = trade_df[use_cols].copy()
+train_df_raw = train_df_raw[use_cols].copy()
+trade_df_raw = trade_df_raw[use_cols].copy()
 
-train_df["date"] = pd.to_datetime(train_df["date"]).dt.strftime("%Y-%m-%d")
-trade_df["date"] = pd.to_datetime(trade_df["date"]).dt.strftime("%Y-%m-%d")
+train_df_raw["date"] = pd.to_datetime(train_df_raw["date"])
+trade_df_raw["date"] = pd.to_datetime(trade_df_raw["date"])
 
-# 检查每个交易日股票池是否完整
-assert train_df.groupby("date")["tic"].nunique().min() == train_df["tic"].nunique(), \
-    "train_df 中存在某些日期股票池不完整"
-assert trade_df.groupby("date")["tic"].nunique().min() == trade_df["tic"].nunique(), \
-    "trade_df 中存在某些日期股票池不完整"
+# 合并成全样本，后面再按年份切
+all_df = pd.concat([train_df_raw, trade_df_raw], axis=0, ignore_index=True)
+all_df = all_df.drop_duplicates(subset=["date", "tic"]).sort_values(["date", "tic"]).reset_index(drop=True)
 
 
 # =========================
-# 3. 从训练数据中切出验证集
+# 3. 数据清洗
 # =========================
-def split_train_val_by_date(
-    df: pd.DataFrame,
-    val_ratio: float = 0.2,
-) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """
-    按日期切分 train/val，保证时间顺序，不打乱。
-    """
-    unique_dates = sorted(df["date"].unique())
-    n_dates = len(unique_dates)
+# def clean_panel(df: pd.DataFrame, name: str) -> pd.DataFrame:
+#     df = df.copy()
 
-    if n_dates <= TIME_WINDOW + 5:
-        raise ValueError(
-            f"训练集日期数过少: {n_dates}，不足以支持 time_window={TIME_WINDOW} 的训练/验证划分。"
-        )
+#     for col in FEATURES:
+#         df[col] = pd.to_numeric(df[col], errors="coerce")
 
-    split_idx = int(n_dates * (1 - val_ratio))
-    split_idx = max(split_idx, TIME_WINDOW + 1)
-    split_idx = min(split_idx, n_dates - (TIME_WINDOW + 1))
+#     df = df.replace([np.inf, -np.inf], np.nan)
 
-    train_dates = unique_dates[:split_idx]
-    val_dates = unique_dates[split_idx:]
+#     # 原始价格必须 > 0
+#     for col in ["close", "high", "low", "open"]:
+#         df.loc[df[col] <= 0, col] = np.nan
 
-    train_sub_df = df[df["date"].isin(train_dates)].copy()
-    val_df = df[df["date"].isin(val_dates)].copy()
+#     n_tic = df["tic"].nunique()
+#     bad_dates = []
 
-    if train_sub_df.empty or val_df.empty:
-        raise ValueError("train/val 划分失败，请检查数据量或 val_ratio。")
+#     for d, g in df.groupby("date"):
+#         if len(g) != n_tic:
+#             bad_dates.append(d)
+#             continue
+#         if not g[FEATURES].notna().all().all():
+#             bad_dates.append(d)
+#             continue
 
-    return train_sub_df, val_df
+#     if bad_dates:
+#         print(f"[{name}] drop bad dates: {len(bad_dates)}")
+#         df = df[~df["date"].isin(bad_dates)].copy()
+
+#     assert df.groupby("date")["tic"].nunique().min() == df["tic"].nunique(), \
+#         f"{name} 中存在某些日期股票池不完整"
+
+#     df = df.sort_values(["date", "tic"]).reset_index(drop=True)
+#     return df
 
 
-train_sub_df, val_df = split_train_val_by_date(train_df, val_ratio=0.2)
+# all_df = clean_panel(all_df, "all")
+
+
+# =========================
+# 4. 按年份切分：训练 2014-2022，回测 2023/2024/2025
+# =========================
+def select_period(df: pd.DataFrame, start_date: str, end_date: str) -> pd.DataFrame:
+    start_date = pd.Timestamp(start_date)
+    end_date = pd.Timestamp(end_date)
+    out = df[(df["date"] >= start_date) & (df["date"] <= end_date)].copy()
+    out["date"] = out["date"].dt.strftime("%Y-%m-%d")
+    return out
+
+
+train_df = select_period(all_df, "2014-01-01", "2022-12-31")
+df_2023 = select_period(all_df, "2023-01-01", "2023-12-31")
+df_2024 = select_period(all_df, "2024-01-01", "2024-12-31")
+df_2025 = select_period(all_df, "2025-01-01", "2025-12-31")
+
+for name, df in [
+    ("train_df", train_df),
+    ("df_2023", df_2023),
+    ("df_2024", df_2024),
+    ("df_2025", df_2025),
+]:
+    if df.empty:
+        raise ValueError(f"{name} 为空，请检查日期范围或数据文件。")
 
 print("=" * 60)
-print("Data split summary")
-print(f"Full train dates: {train_df['date'].nunique()}")
-print(f"Train dates:      {train_sub_df['date'].nunique()}")
-print(f"Val dates:        {val_df['date'].nunique()}")
-print(f"Trade dates:      {trade_df['date'].nunique()}")
+print("Dataset summary")
+print(f"Train dates: {train_df['date'].nunique()} | range: {train_df['date'].min()} -> {train_df['date'].max()}")
+print(f"2023  dates: {df_2023['date'].nunique()} | range: {df_2023['date'].min()} -> {df_2023['date'].max()}")
+print(f"2024  dates: {df_2024['date'].nunique()} | range: {df_2024['date'].min()} -> {df_2024['date'].max()}")
+print(f"2025  dates: {df_2025['date'].nunique()} | range: {df_2025['date'].min()} -> {df_2025['date'].max()}")
 print("=" * 60)
 
 
 # =========================
-# 4. 构造环境函数
+# 5. 自定义归一化
+# =========================
+PRICE_LIKE = ["close", "high", "low", "open", "boll_ub", "boll_lb"]
+STATIONARY = [
+    "macd",
+    "rsi_30",
+    "cci_30",
+    "dx_30",
+    "close_30_sma",
+    "close_60_sma",
+    "vol_ratio20",
+    "r1",
+    "r5",
+    "r10",
+    "r20",
+    "intraday",
+    "overnight",
+    "range",
+]
+
+
+def mixed_normalize(df: pd.DataFrame) -> pd.DataFrame:
+    df = df.sort_values(["tic", "date"]).copy()
+
+    # 价格型做 x_t / x_{t-1}
+    for col in PRICE_LIKE:
+        prev = df.groupby("tic")[col].shift(1)
+        df[col] = df[col] / prev
+        df[col] = df[col].replace([np.inf, -np.inf], np.nan).fillna(1.0)
+
+    # 已经平稳/收益型特征不再除以前一期
+    for col in STATIONARY:
+        df[col] = pd.to_numeric(df[col], errors="coerce")
+        df[col] = df[col].replace([np.inf, -np.inf], np.nan).fillna(0.0)
+
+    return df
+
+
+# =========================
+# 6. 构造环境：完全按 demo 风格，分段单独实例化
 # =========================
 def make_env(df: pd.DataFrame, cwd: str = "./") -> PortfolioOptimizationEnv:
-    return PortfolioOptimizationEnv(
-        df=df.copy(),
-        initial_amount=INITIAL_AMOUNT,
-        order_df=True,
-        return_last_action=False,
-        normalize_df="by_previous_time",
-        reward_scaling=100,
-        comission_fee_model="trf",
-        comission_fee_pct=COMISSION_FEE_PCT,
-        features=FEATURES,
-        valuation_feature="close",
-        time_column="date",
-        time_format="%Y-%m-%d",
-        tic_column="tic",
-        tics_in_portfolio="all",
-        time_window=TIME_WINDOW,
-        cwd=cwd,
-        new_gym_api=False,
-    )
+    # 静默创建，屏蔽环境内部 print
+    with contextlib.redirect_stdout(io.StringIO()):
+        env = PortfolioOptimizationEnv(
+            df=df.copy(),
+            initial_amount=INITIAL_AMOUNT,
+            order_df=True,
+            return_last_action=False,
+            normalize_df=mixed_normalize,
+            reward_scaling=100,
+            comission_fee_model="trf",
+            comission_fee_pct=COMISSION_FEE_PCT,
+            features=FEATURES,
+            valuation_feature="close",
+            time_column="date",
+            time_format="%Y-%m-%d",
+            tic_column="tic",
+            tics_in_portfolio="all",
+            time_window=TIME_WINDOW,
+            cwd=cwd,
+            new_gym_api=False,
+        )
+    return env
 
 
-train_env = make_env(train_sub_df)
-val_env = make_env(val_df)
-trade_env = make_env(trade_df)
+train_env = make_env(train_df)
+environment_2023 = make_env(df_2023)
+environment_2024 = make_env(df_2024)
+environment_2025 = make_env(df_2025)
 
 
 # =========================
-# 5. 工具函数（注意：必须放在训练循环前）
+# 7. 工具函数
 # =========================
 def get_env_portfolio_curve(env) -> list[float]:
-    """
-    提取组合价值曲线。
-    优先从 env._asset_memory["final"] 中取。
-    """
-    if not hasattr(env, "_asset_memory"):
-        raise AttributeError("Environment has no attribute '_asset_memory'.")
-
     asset_memory = env._asset_memory
-
     if isinstance(asset_memory, dict):
-        if "final" in asset_memory:
-            curve = asset_memory["final"]
-        else:
-            raise KeyError("env._asset_memory exists, but key 'final' was not found.")
+        curve = asset_memory["final"]
     else:
         curve = asset_memory
-
     curve = list(curve)
     if len(curve) == 0:
         raise ValueError("Portfolio value curve is empty.")
-
     return curve
 
 
 def get_env_action_memory(env):
-    """
-    提取动作权重历史。
-    优先尝试:
-      1) env._asset_memory["actions"]
-      2) env._actions_memory / env._action_memory / ...
-    """
     if hasattr(env, "_asset_memory"):
         asset_memory = getattr(env, "_asset_memory")
         if isinstance(asset_memory, dict) and "actions" in asset_memory:
@@ -213,7 +257,6 @@ def get_env_action_memory(env):
         "actions_memory",
         "action_memory",
     ]
-
     for name in candidate_names:
         if hasattr(env, name):
             memory = getattr(env, name)
@@ -225,6 +268,7 @@ def get_env_action_memory(env):
 
 def calc_metrics(curve: list[float]) -> dict:
     arr = np.asarray(curve, dtype=float)
+
     if len(arr) < 2:
         return {
             "final_value": float(arr[-1]) if len(arr) else 0.0,
@@ -246,44 +290,41 @@ def calc_metrics(curve: list[float]) -> dict:
     }
 
 
-def run_equal_weight_baseline(df: pd.DataFrame) -> tuple[list[float], object]:
-    """
-    等权 Buy-and-Hold 基线:
-    action = [0] + [1/N] * N
-    第一个维度通常是 cash。
-    """
-    env = make_env(df)
+def summarize_curve(name: str, curve: list[float]):
+    m = calc_metrics(curve)
+    print(f"{name}:")
+    print(f"  Initial portfolio value: {curve[0]:.4f}")
+    print(f"  Final portfolio value:   {m['final_value']:.4f}")
+    print(f"  Cumulative return:       {m['cum_return']:.6f}")
+    print(f"  Sharpe ratio:            {m['sharpe']:.6f}")
+    print(f"  Maximum DrawDown:        {m['max_drawdown']:.6f}")
+    print("-" * 50)
 
-    n_assets = df["tic"].nunique()
+
+def run_drl_on_existing_env(env: PortfolioOptimizationEnv, model) -> list[float]:
+    with contextlib.redirect_stdout(io.StringIO()):
+        DRLAgent.DRL_validation(
+            model=model,
+            test_env=env,
+            policy=None,
+            online_training_period=10**18,
+            learning_rate=0.0,
+            optimizer=None,
+            batch_size=BATCH_SIZE,
+        )
+    return get_env_portfolio_curve(env)
+
+
+def run_equal_weight_on_existing_env(env: PortfolioOptimizationEnv, n_assets: int) -> list[float]:
     action = [0.0] + [1.0 / n_assets] * n_assets
-
     terminated = False
-    env.reset()
 
-    while not terminated:
-        _, _, terminated, _ = env.step(action)
+    with contextlib.redirect_stdout(io.StringIO()):
+        env.reset()
+        while not terminated:
+            _, _, terminated, _ = env.step(action)
 
-    curve = get_env_portfolio_curve(env)
-    return curve, env
-
-
-def run_drl_validation(df: pd.DataFrame, model) -> tuple[list[float], object]:
-    """
-    在给定数据上跑一次验证/评估，拿到组合价值曲线。
-    """
-    env = make_env(df)
-
-    DRLAgent.DRL_validation(
-        model=model,
-        test_env=env,
-        policy=None,
-        online_training_period=999999,  # 近似关闭 online training
-        learning_rate=0,
-        optimizer=None,
-    )
-
-    curve = get_env_portfolio_curve(env)
-    return curve, env
+    return get_env_portfolio_curve(env)
 
 
 def plot_performance_curve(baseline_curve, drl_curve, title, save_path):
@@ -296,21 +337,16 @@ def plot_performance_curve(baseline_curve, drl_curve, title, save_path):
     plt.legend()
     plt.tight_layout()
     plt.savefig(save_path, dpi=300)
-    plt.show()
+    plt.close()
 
 
 def plot_actions_memory(env, title, save_path):
-    """
-    画动作权重图。
-    如果环境里取不到动作记忆，就跳过。
-    """
     actions_memory = get_env_action_memory(env)
     if actions_memory is None:
         print(f"[Warning] Cannot find action memory for: {title}")
         return
 
     actions = np.array(actions_memory)
-
     if actions.ndim != 2:
         print(f"[Warning] action memory has unexpected shape: {actions.shape}")
         return
@@ -324,22 +360,11 @@ def plot_actions_memory(env, title, save_path):
     plt.title(title)
     plt.tight_layout()
     plt.savefig(save_path, dpi=300)
-    plt.show()
-
-
-def summarize_curve(name: str, curve: list[float]):
-    m = calc_metrics(curve)
-    print(f"{name}:")
-    print(f"  Initial portfolio value: {curve[0]:.4f}")
-    print(f"  Final portfolio value:   {m['final_value']:.4f}")
-    print(f"  Cumulative return:       {m['cum_return']:.6f}")
-    print(f"  Sharpe ratio:            {m['sharpe']:.6f}")
-    print(f"  Maximum DrawDown:        {m['max_drawdown']:.6f}")
-    print("-" * 50)
+    plt.close()
 
 
 # =========================
-# 6. 建 agent 和 model
+# 8. 建 agent 和 model（不加验证集）
 # =========================
 agent = DRLAgent(env=train_env)
 
@@ -351,7 +376,6 @@ model = agent.get_model(
         "batch_size": BATCH_SIZE,
         "policy": EIIE,
         "action_noise": 0.05,
-        "validation_env": val_env,   # 若你的 finrl 版本不支持，可删掉这一行
     },
     policy_kwargs={
         "initial_features": len(FEATURES),
@@ -361,169 +385,51 @@ model = agent.get_model(
 
 
 # =========================
-# 7. 训练（逐episode + 最优checkpoint）
+# 9. 训练：每个 episode 只输出 Train EIIE-PG
 # =========================
-best_val_value = -np.inf
-best_episode = -1
-best_state_dict = None
-
 trained_model = model
 
 for ep in range(EPISODES):
-    # 每次只训练 1 个 episode，并继续在上一次参数基础上训练
-    trained_model = agent.train_model(model=trained_model, episodes=1)
+    with contextlib.redirect_stdout(io.StringIO()):
+        trained_model = agent.train_model(model=trained_model, episodes=1)
 
-    # 在验证集上评估
-    val_curve_ep, _ = run_drl_validation(val_df, trained_model)
-    val_final = float(val_curve_ep[-1])
+    train_curve_ep = get_env_portfolio_curve(train_env)
 
-    is_best = val_final > best_val_value
+    print(f"\nEpisode {ep + 1}/{EPISODES}")
+    print("-" * 50)
+    summarize_curve("Train EIIE-PG", train_curve_ep)
 
-    if is_best:
-        best_val_value = val_final
-        best_episode = ep + 1
-        best_state_dict = copy.deepcopy(trained_model.train_policy.state_dict())
+torch.save(trained_model.train_policy.state_dict(), MODEL_PATH)
+print(f"\n训练结束，最终策略参数已保存到 {MODEL_PATH}")
 
-        # 保存完整 checkpoint
-        torch.save(
-            {
-                "episode": best_episode,
-                "val_portfolio_value": best_val_value,
-                "policy_state_dict": best_state_dict,
-            },
-            BEST_MODEL_PATH,
-        )
 
-    swanlab.log({
-        "episode": ep + 1,
-        "val_portfolio_value": val_final,
-        "best_val_portfolio_value": best_val_value,
-    })
+# =========================
+# 10. 分年份单独回测 + plot
+# =========================
+def backtest_one_year(year: int, env: PortfolioOptimizationEnv, raw_df: pd.DataFrame, model):
+    n_assets = raw_df["tic"].nunique()
 
-    print(
-        f"Episode {ep + 1}/{EPISODES} | "
-        f"val_value={val_final:.2f} | "
-        f"best={best_val_value:.2f}"
+    bh_curve = run_equal_weight_on_existing_env(env, n_assets)
+    drl_curve = run_drl_on_existing_env(env, model)
+
+    print()
+    summarize_curve(f"{year} Buy and Hold", bh_curve)
+    summarize_curve(f"{year} EIIE-PG", drl_curve)
+
+    plot_performance_curve(
+        baseline_curve=bh_curve,
+        drl_curve=drl_curve,
+        title=f"Performance in {year}",
+        save_path=os.path.join(SAVE_DIR, f"performance_{year}.png"),
     )
 
-    if is_best:
-        print(f"  ✓ New best at episode {best_episode}, saved to {BEST_MODEL_PATH}")
-
-if best_state_dict is None:
-    raise RuntimeError("训练结束后没有得到有效的 best checkpoint，请检查训练过程。")
-
-print(
-    f"\n训练结束，最优 checkpoint 来自 episode {best_episode}，"
-    f"val_value={best_val_value:.2f}"
-)
-
-# 训练结束后，将最优参数加载回当前模型
-trained_model.train_policy.load_state_dict(best_state_dict)
-print("已将验证集最优参数加载回当前模型。")
-
-# 再单独保存一份纯策略参数
-torch.save(best_state_dict, MODEL_PATH)
-print(f"最终最优策略参数已保存到 {MODEL_PATH}")
+    plot_actions_memory(
+        env=env,
+        title=f"Actions performed in {year}",
+        save_path=os.path.join(SAVE_DIR, f"actions_{year}.png"),
+    )
 
 
-# =========================
-# 8. 训练集表现图：EIIE vs Buy-and-Hold
-# =========================
-train_bh_curve, train_bh_env = run_equal_weight_baseline(train_sub_df)
-train_drl_curve, train_eval_env = run_drl_validation(train_sub_df, trained_model)
-
-plot_performance_curve(
-    baseline_curve=train_bh_curve,
-    drl_curve=train_drl_curve,
-    title="Performance in training period",
-    save_path=os.path.join(SAVE_DIR, "train_performance.png"),
-)
-
-plot_actions_memory(
-    env=train_eval_env,
-    title="Actions performed in training period",
-    save_path=os.path.join(SAVE_DIR, "train_actions.png"),
-)
-
-summarize_curve("Train Buy and Hold", train_bh_curve)
-summarize_curve("Train EIIE-PG", train_drl_curve)
-
-
-# =========================
-# 9. 验证集表现图：EIIE vs Buy-and-Hold
-# =========================
-val_bh_curve, val_bh_env = run_equal_weight_baseline(val_df)
-val_drl_curve, val_eval_env = run_drl_validation(val_df, trained_model)
-
-plot_performance_curve(
-    baseline_curve=val_bh_curve,
-    drl_curve=val_drl_curve,
-    title="Performance in validation period",
-    save_path=os.path.join(SAVE_DIR, "val_performance.png"),
-)
-
-plot_actions_memory(
-    env=val_eval_env,
-    title="Actions performed in validation period",
-    save_path=os.path.join(SAVE_DIR, "val_actions.png"),
-)
-
-summarize_curve("Val Buy and Hold", val_bh_curve)
-summarize_curve("Val EIIE-PG", val_drl_curve)
-
-
-# =========================
-# 10. 交易集表现图：EIIE vs Buy-and-Hold
-# =========================
-trade_bh_curve, trade_bh_env = run_equal_weight_baseline(trade_df)
-trade_drl_curve, trade_eval_env = run_drl_validation(trade_df, trained_model)
-
-plot_performance_curve(
-    baseline_curve=trade_bh_curve,
-    drl_curve=trade_drl_curve,
-    title="Performance in trading period",
-    save_path=os.path.join(SAVE_DIR, "trade_performance.png"),
-)
-
-plot_actions_memory(
-    env=trade_eval_env,
-    title="Actions performed in trading period",
-    save_path=os.path.join(SAVE_DIR, "trade_actions.png"),
-)
-
-summarize_curve("Trade Buy and Hold", trade_bh_curve)
-summarize_curve("Trade EIIE-PG", trade_drl_curve)
-
-
-# =========================
-# 11. SwanLab 记录
-# =========================
-train_metrics = calc_metrics(train_drl_curve)
-val_metrics = calc_metrics(val_drl_curve)
-trade_metrics = calc_metrics(trade_drl_curve)
-
-swanlab.log({
-    "best_episode": best_episode,
-    "best_val_portfolio_value": best_val_value,
-
-    "train_bh_final_value": float(train_bh_curve[-1]),
-    "train_drl_final_value": float(train_drl_curve[-1]),
-    "val_bh_final_value": float(val_bh_curve[-1]),
-    "val_drl_final_value": float(val_drl_curve[-1]),
-    "trade_bh_final_value": float(trade_bh_curve[-1]),
-    "trade_drl_final_value": float(trade_drl_curve[-1]),
-
-    "train_drl_cum_return": train_metrics["cum_return"],
-    "train_drl_sharpe": train_metrics["sharpe"],
-    "train_drl_max_drawdown": train_metrics["max_drawdown"],
-
-    "val_drl_cum_return": val_metrics["cum_return"],
-    "val_drl_sharpe": val_metrics["sharpe"],
-    "val_drl_max_drawdown": val_metrics["max_drawdown"],
-
-    "trade_drl_cum_return": trade_metrics["cum_return"],
-    "trade_drl_sharpe": trade_metrics["sharpe"],
-    "trade_drl_max_drawdown": trade_metrics["max_drawdown"],
-})
-
-swanlab.finish()
+backtest_one_year(2023, environment_2023, df_2023, trained_model)
+backtest_one_year(2024, environment_2024, df_2024, trained_model)
+backtest_one_year(2025, environment_2025, df_2025, trained_model)

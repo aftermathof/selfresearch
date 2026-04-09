@@ -9,14 +9,15 @@ from finrl.meta.preprocessor.yahoodownloader import YahooDownloader
 
 # =========================================================
 # 1. 日期配置
+#    新方案：
+#    - 训练：2014-01-01 ~ 2022-12-31
+#    - 样本外回测总区间：2023-01-01 ~ 2025-12-31
+#      后续在 train.py 里再切成 2023 / 2024 / 2025 三个环境
 # =========================================================
 TRAIN_START_DATE = "2014-01-01"
-TRAIN_END_DATE = "2023-12-31"
+TRAIN_END_DATE = "2022-12-31"
 
-TEST_START_DATE = "2024-01-01"
-TEST_END_DATE = "2025-12-31"
-
-TRADE_START_DATE = "2024-01-01"
+TRADE_START_DATE = "2023-01-01"
 TRADE_END_DATE = "2025-12-31"
 
 
@@ -54,9 +55,9 @@ try:
     from finrl.config_tickers import SSE50_20_TICKER as RAW_TICKER_LIST
 except Exception:
     RAW_TICKER_LIST = [
-        "600009.SS", "601088.SS", "601236.SS", "600019.SS", "601818.SS",
-        "601800.SS", "601111.SS", "601939.SS", "601628.SS", "601658.SS",
-        "601006.SS", "601816.SS", "600606.SS", "601319.SS", "601229.SS"
+        "601012.SS", "600030.SS", "603259.SS", "600887.SS", "600031.SS",
+        "601318.SS", "601688.SS", "600276.SS", "600703.SS", "600048.SS",
+        "601166.SS", "600519.SS", "601888.SS", "600036.SS", "601138.SS"
     ]
 
 
@@ -176,7 +177,9 @@ def add_custom_features(df: pd.DataFrame) -> pd.DataFrame:
     df["range"] = safe_log_ratio(df["high"], df["low"])
 
     # ---- volume ratio 20 ----
-    vol_ma20 = g["volume"].transform(lambda s: s.rolling(window=20, min_periods=20).mean())
+    vol_ma20 = g["volume"].transform(
+        lambda s: s.rolling(window=20, min_periods=20).mean()
+    )
     df["vol_ratio20"] = safe_log_ratio(df["volume"], vol_ma20)
 
     print("Custom features added:")
@@ -208,7 +211,6 @@ def filter_complete_panel(df: pd.DataFrame) -> pd.DataFrame:
         "volume",
     ] + INDICATORS + CUSTOM_FEATURES
 
-    # 如果 turbulence 存在，也要求非空
     if "turbulence" in df.columns:
         required_cols.append("turbulence")
 
@@ -217,12 +219,9 @@ def filter_complete_panel(df: pd.DataFrame) -> pd.DataFrame:
             return False
         return day_df[required_cols].notna().all().all()
 
-    valid_dates = (
-        df.groupby("date")
-        .apply(is_valid_day)
-    )
-
+    valid_dates = df.groupby("date").apply(is_valid_day)
     valid_dates = valid_dates[valid_dates].index
+
     before_rows = len(df)
     before_dates = df["date"].nunique()
 
@@ -242,6 +241,9 @@ def filter_complete_panel(df: pd.DataFrame) -> pd.DataFrame:
 
 # =========================================================
 # 9. 划分数据并保存
+#    - train_data1.csv : 2014-2022
+#    - trade_data1.csv : 2023-2025
+#      后续在 train.py 里按年份切成 2023/2024/2025 三个环境
 # =========================================================
 def save_splits(df_processed: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
     print("Splitting train/trade data...")
@@ -291,8 +293,8 @@ if __name__ == "__main__":
     print("Saved files:")
     print("- raw_data.csv")
     print("- processed_data.csv")
-    print("- train_data1.csv")
-    print("- trade_data1.csv")
+    print("- train_data1.csv   (2014-2022)")
+    print("- trade_data1.csv   (2023-2025)")
     print("=" * 80)
 
     print("Train tickers:", sorted(train["tic"].unique().tolist()))

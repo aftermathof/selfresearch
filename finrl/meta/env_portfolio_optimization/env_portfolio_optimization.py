@@ -598,7 +598,7 @@ class PortfolioOptimizationEnv(gym.Env):
                 for column in self._features:
                     self._df[column] = self._df[column] / self._df[normalizer_column]
         elif callable(normalize):
-            print("Applying custom normalization function...")
+            # print("Applying custom normalization function...")
             self._df = normalize(self._df)
         else:
             print("No normalization was performed.")

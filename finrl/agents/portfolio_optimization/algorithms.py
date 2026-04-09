@@ -14,18 +14,6 @@ from .utils import PVM
 from .utils import ReplayBuffer
 from .utils import RLDataset
 
-try:
-    import swanlab
-    _SWANLAB_AVAILABLE = True
-except ImportError:
-    _SWANLAB_AVAILABLE = False
-
-
-def _swanlog(metrics: dict, step: int = None):
-    """SwanLab 未安装时静默跳过。"""
-    if _SWANLAB_AVAILABLE:
-        swanlab.log(metrics, step=step)
-
 
 def _calc_metrics(portfolio_values: list) -> dict:
     """根据组合净值序列计算年化 Sharpe 和最大回撤。"""
@@ -146,11 +134,10 @@ class PolicyGradient:
         Args:
             episodes: Number of episodes to simulate.
         """
-        for i in tqdm(range(1, episodes + 1)):
+        for _ in tqdm(range(1, episodes + 1)):
             obs = self.train_env.reset()
             self.train_pvm.reset()
             done = False
-            episode_losses = []
 
             while not done:
                 last_action = self.train_pvm.retrieve()
@@ -164,49 +151,19 @@ class PolicyGradient:
                 self.train_pvm.add(action)
 
                 next_obs, reward, done, info = self.train_env.step(action)
+
                 exp = (obs, last_action, info["price_variation"], info["trf_mu"])
                 self.train_buffer.append(exp)
 
                 if len(self.train_buffer) == self.train_batch_size:
-                    loss_val = self._gradient_ascent()
-                    if loss_val is not None:
-                        episode_losses.append(loss_val)
+                    self._gradient_ascent()
 
                 obs = next_obs
 
             # episode 末尾剩余数据
-            loss_val = self._gradient_ascent()
-            if loss_val is not None:
-                episode_losses.append(loss_val)
+            self._gradient_ascent()
 
-            # ── 训练集指标 ──────────────────────────────────────
-            train_vals = self.train_env._asset_memory["final"]
-            train_return = train_vals[-1] / train_vals[0]
-            train_stats = _calc_metrics(train_vals)
-
-            # 持仓集中度 & 换手率
-            actions_mem = _get_action_memory(self.train_env)
-            if len(actions_mem) > 1:
-                w = np.array(actions_mem, dtype=float)
-                if w.ndim == 2 and w.shape[1] > 1:
-                    max_weight = float(w[:, 1:].max(axis=1).mean())
-                    turnover = float(np.abs(np.diff(w, axis=0)).sum(axis=1).mean())
-                else:
-                    max_weight, turnover = 0.0, 0.0
-            else:
-                max_weight, turnover = 0.0, 0.0
-
-            metrics = {
-                "train/loss": float(np.mean(episode_losses)) if episode_losses else 0.0,
-                "train/return": float(train_return),
-                "train/sharpe": train_stats["sharpe"],
-                "train/max_drawdown": train_stats["max_drawdown"],
-                "train/max_weight": max_weight,
-                "train/turnover": turnover,
-            }
-
-            # ── 验证集指标 ──────────────────────────────────────
-            # 注意：这里关闭 online learning，避免污染验证集指标
+            # 如果传了 validation_env，则按 demo 风格在每个 episode 末尾跑一次验证
             if self.validation_env is not None:
                 self.test(
                     self.validation_env,
@@ -216,17 +173,6 @@ class PolicyGradient:
                     lr=0.0,
                     optimizer=None,
                 )
-
-                val_vals = self.validation_env._asset_memory["final"]
-                val_return = val_vals[-1] / val_vals[0]
-                val_stats = _calc_metrics(val_vals)
-                metrics.update({
-                    "val/return": float(val_return),
-                    "val/sharpe": val_stats["sharpe"],
-                    "val/max_drawdown": val_stats["max_drawdown"],
-                })
-
-            _swanlog(metrics, step=i)
 
     def _setup_test(self, env, policy, batch_size, lr, optimizer):
         """Initializes algorithm before testing."""
