@@ -55,9 +55,16 @@ try:
     from finrl.config_tickers import SSE50_20_TICKER as RAW_TICKER_LIST
 except Exception:
     RAW_TICKER_LIST = [
-        "601012.SS", "600030.SS", "603259.SS", "600887.SS", "600031.SS",
-        "601318.SS", "601688.SS", "600276.SS", "600703.SS", "600048.SS",
-        "601166.SS", "600519.SS", "601888.SS", "600036.SS", "601138.SS"
+        "601012.SS",
+        "600887.SS",
+        "600030.SS",   
+        "600031.SS",
+        "600036.SS",        
+        "600276.SS", 
+        "600519.SS", 
+        "601318.SS", 
+        "600703.SS", 
+        "601166.SS", 
     ]
 
 

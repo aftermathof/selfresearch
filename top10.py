@@ -295,4 +295,4 @@ print("\n前16只股票代码：")
 print(top16["tic"].tolist())
 
 # 保存
-top16.to_csv("top16_liquidity_from_yfinance.csv", index=False, encoding="utf-8-sig")
+top16.to_csv("top10_liquidity_from_yfinance.csv", index=False, encoding="utf-8-sig")
