@@ -26,7 +26,7 @@ import finrl.agents.portfolio_optimization.algorithms as algo_mod
 INITIAL_AMOUNT = 1_000_000
 TIME_WINDOW = 50
 EPISODES = 5
-LR = 1e-5
+LR = 1e-4
 BATCH_SIZE = 64
 COMISSION_FEE_PCT = 0.001
 SEED = 42
@@ -487,6 +487,8 @@ model = agent.get_model(
         "batch_size": BATCH_SIZE,
         "policy": EIIE,
         "action_noise": 0.01,
+        # "risk_penalty_coef": 1e-3,   # 新增
+
     },
     policy_kwargs={
         "initial_features": POLICY_INITIAL_FEATURES,
