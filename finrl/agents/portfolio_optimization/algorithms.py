@@ -305,7 +305,7 @@ class PolicyGradient:
         #    注意：这里用的是目标权重 mu 与 last_actions 的差
         # -----------------------------
         turnover = torch.sum(torch.abs(mu - last_actions), dim=1).mean()
-        turnover_coef = 5e-4
+        turnover_coef = 1e-4
 
         # -----------------------------
         # 4) 总 loss

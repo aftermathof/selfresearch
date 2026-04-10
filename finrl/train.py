@@ -26,7 +26,7 @@ import finrl.agents.portfolio_optimization.algorithms as algo_mod
 # =========================
 INITIAL_AMOUNT = 1_000_000
 TIME_WINDOW = 50
-EPISODES = 40
+EPISODES = 10
 LR = 1e-4 
 BATCH_SIZE = 64
 COMISSION_FEE_PCT = 0.002
@@ -117,8 +117,8 @@ def select_period(df: pd.DataFrame, start_date: str, end_date: str) -> pd.DataFr
     return out
 
 
-train_df = select_period(all_df, "2014-01-01", "2020-12-31")
-val_df = select_period(all_df, "2021-01-01", "2021-12-31")
+train_df = select_period(all_df, "2014-01-01", "2018-12-31")
+val_df = select_period(all_df, "2019-01-01", "2019-12-31")
 df_2023 = select_period(all_df, "2023-01-01", "2023-12-31")
 df_2024 = select_period(all_df, "2024-01-01", "2024-12-31")
 df_2025 = select_period(all_df, "2025-01-01", "2025-12-31")

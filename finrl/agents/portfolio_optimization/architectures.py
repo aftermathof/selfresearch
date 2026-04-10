@@ -13,10 +13,10 @@ from torch_geometric.utils import to_dense_batch
 class EIIE(nn.Module):
     def __init__(
         self,
-        initial_features=3,
+        initial_features=13,
         k_size=3,
-        conv_mid_features=2,
-        conv_final_features=20,
+        conv_mid_features=8,
+        conv_final_features=32,
         time_window=50,
         device="cpu",
     ):
@@ -95,7 +95,7 @@ class EIIE(nn.Module):
         output = torch.squeeze(output, 3)
         output = torch.squeeze(output, 1)  # shape [N, PORTFOLIO_SIZE + 1]
 
-        temperature = 1.5
+        temperature = 1
         output = torch.softmax(output / temperature, dim=1)
         return output
 
