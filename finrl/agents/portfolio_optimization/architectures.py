@@ -95,8 +95,8 @@ class EIIE(nn.Module):
         output = torch.squeeze(output, 3)
         output = torch.squeeze(output, 1)  # shape [N, PORTFOLIO_SIZE + 1]
 
-        output = self.softmax(output)
-
+        temperature = 1.5
+        output = torch.softmax(output / temperature, dim=1)
         return output
 
     def forward(self, observation, last_action):

@@ -9,6 +9,7 @@ import numpy as np
 import pandas as pd
 import torch
 import matplotlib.pyplot as plt
+from torch.optim import AdamW
 
 from gym import spaces
 
@@ -25,10 +26,10 @@ import finrl.agents.portfolio_optimization.algorithms as algo_mod
 # =========================
 INITIAL_AMOUNT = 1_000_000
 TIME_WINDOW = 50
-EPISODES = 5
-LR = 1e-4
+EPISODES = 40
+LR = 1e-4 
 BATCH_SIZE = 64
-COMISSION_FEE_PCT = 0.001
+COMISSION_FEE_PCT = 0.002
 SEED = 42
 
 FEATURES = [
@@ -78,7 +79,7 @@ set_seed(SEED)
 # =========================
 # 2. 关闭 tqdm 进度条
 # =========================
-algo_mod.tqdm = lambda x: x
+# algo_mod.tqdm = lambda x: x
 
 
 # =========================
@@ -116,7 +117,7 @@ def select_period(df: pd.DataFrame, start_date: str, end_date: str) -> pd.DataFr
     return out
 
 
-train_df = select_period(all_df, "2016-01-01", "2020-12-31")
+train_df = select_period(all_df, "2014-01-01", "2020-12-31")
 val_df = select_period(all_df, "2021-01-01", "2021-12-31")
 df_2023 = select_period(all_df, "2023-01-01", "2023-12-31")
 df_2024 = select_period(all_df, "2024-01-01", "2024-12-31")
@@ -158,10 +159,7 @@ print("=" * 60)
 # =========================
 PRICE_LIKE = ["close"]
 STATIONARY = [
-    "macd",
-    "rsi_30",
-    "cci_30",
-    "dx_30",
+    "macd","rsi_30","cci_30","dx_30",
     "vol_ratio20",
     "r1",
     "r5",
@@ -486,9 +484,9 @@ model = agent.get_model(
         "lr": LR,
         "batch_size": BATCH_SIZE,
         "policy": EIIE,
-        "action_noise": 0.01,
+        "action_noise": 0.05 ,
         # "risk_penalty_coef": 1e-3,   # 新增
-
+        # "optimizer": lambda params, lr: AdamW(params, lr=lr, weight_decay=1e-4),
     },
     policy_kwargs={
         "initial_features": POLICY_INITIAL_FEATURES,

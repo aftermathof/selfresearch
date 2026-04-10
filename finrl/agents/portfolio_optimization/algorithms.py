@@ -252,7 +252,15 @@ class PolicyGradient:
             obs = next_obs
 
     def _gradient_ascent(self, test=False):
-        """Performs the gradient ascent step in the policy gradient algorithm."""
+        """Performs the gradient ascent step in the policy gradient algorithm.
+
+        改动说明：
+        1) 保留原始 log-growth 主目标；
+        2) 加 entropy regularization，防止权重过于 one-hot；
+        3) 加 turnover regularization，惩罚和上一步权重差太大；
+        4) 对 log 输入做 clamp，避免数值不稳定；
+        5) 加梯度裁剪，避免训练后期越来越激进。
+        """
         if test:
             if len(self.test_buffer) == 0:
                 return None
@@ -271,23 +279,54 @@ class PolicyGradient:
         price_variations = price_variations.to(self.device)
         trf_mu = trf_mu.unsqueeze(1).to(self.device)
 
+        # 当前策略输出的目标权重
         mu = (
             self.test_policy.mu(obs, last_actions)
             if test
             else self.train_policy.mu(obs, last_actions)
         )
 
-        policy_loss = -torch.mean(
-            torch.log(torch.sum(mu * price_variations * trf_mu, dim=1))
+        # -----------------------------
+        # 1) 原始 growth 项：安全版 log
+        # -----------------------------
+        portfolio_growth = torch.sum(mu * price_variations * trf_mu, dim=1)
+        portfolio_growth = torch.clamp(portfolio_growth, min=1e-8)
+        growth_loss = -torch.mean(torch.log(portfolio_growth))
+
+        # -----------------------------
+        # 2) 熵正则：防止过度 one-hot
+        #    熵越大，分布越平滑
+        # -----------------------------
+        entropy = -torch.sum(mu * torch.log(mu + 1e-8), dim=1).mean()
+        entropy_coef = 5e-3
+
+        # -----------------------------
+        # 3) 调仓平滑正则：惩罚和上一期权重差太大
+        #    注意：这里用的是目标权重 mu 与 last_actions 的差
+        # -----------------------------
+        turnover = torch.sum(torch.abs(mu - last_actions), dim=1).mean()
+        turnover_coef = 5e-4
+
+        # -----------------------------
+        # 4) 总 loss
+        #    最小化 growth_loss；
+        #    同时鼓励更高熵、减少过猛调仓
+        # -----------------------------
+        policy_loss = (
+            growth_loss
+            - entropy_coef * entropy
+            + turnover_coef * turnover
         )
 
         if test:
             self.test_optimizer.zero_grad()
             policy_loss.backward()
+            torch.nn.utils.clip_grad_norm_(self.test_policy.parameters(), max_norm=1.0)
             self.test_optimizer.step()
         else:
             self.train_optimizer.zero_grad()
             policy_loss.backward()
+            torch.nn.utils.clip_grad_norm_(self.train_policy.parameters(), max_norm=1.0)
             self.train_optimizer.step()
 
         return policy_loss.item()
