@@ -16,7 +16,7 @@ from finrl.meta.env_portfolio_optimization.env_portfolio_optimization import (
     PortfolioOptimizationEnv,
 )
 from finrl.agents.portfolio_optimization.models import DRLAgent
-from finrl.agents.portfolio_optimization.architectures import EIIE
+from FinRL.finrl.agents.portfolio_optimization.architectures_changed import EIIE
 import finrl.agents.portfolio_optimization.algorithms as algo_mod
 
 

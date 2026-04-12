@@ -5,7 +5,7 @@ This agent was developed to work with environments like PortfolioOptimizationEnv
 
 from __future__ import annotations
 
-from .algorithms import PolicyGradient
+from .algorithms_raw import PolicyGradient
 
 MODELS = {"pg": PolicyGradient}
 
@@ -14,7 +14,7 @@ class DRLAgent:
     """Implementation for DRL algorithms for portfolio optimization.
 
     Note:
-        During testing, the agent can be optimized through online learning.
+        During testing, the agent is optimized through online learning.
         The parameters of the policy is updated repeatedly after a constant
         period of time. To disable it, set learning rate to 0.
 
@@ -45,7 +45,7 @@ class DRLAgent:
             model_kwargs and policy_kwargs are dictionaries. The keys must be strings
             with the same names as the class arguments. Example for model_kwargs::
 
-                {"lr": 0.01, "policy": EIIE}
+            { "lr": 0.01, "policy": EIIE }
 
         Returns:
             An instance of the model.
@@ -72,7 +72,7 @@ class DRLAgent:
 
         Args:
             model: Instance of the model.
-            episodes: Number of episodes.
+            episoded: Number of episodes.
 
         Returns:
             An instance of the trained model.
@@ -88,7 +88,6 @@ class DRLAgent:
         online_training_period=10,
         learning_rate=None,
         optimizer=None,
-        batch_size=None,
     ):
         """Tests a model in a testing environment.
 
@@ -96,21 +95,14 @@ class DRLAgent:
             model: Instance of the model.
             test_env: Gym environment to be used in testing.
             policy: Policy architecture to be used. If None, it will use the training
-                architecture.
+            architecture.
             online_training_period: Period in which an online training will occur. To
                 disable online learning, use a very big value.
-            learning_rate: Policy neural network learning rate. If None, it will use
-                the training learning rate.
+            batch_size: Batch size to train neural network. If None, it will use the
+                training batch size.
+            lr: Policy neural network learning rate. If None, it will use the training
+                learning rate
             optimizer: Optimizer of neural network. If None, it will use the training
-                optimizer.
-            batch_size: Batch size used in testing/online learning. If None, it will
-                use the training batch size.
+                optimizer
         """
-        model.test(
-            env=test_env,
-            policy=policy,
-            online_training_period=online_training_period,
-            batch_size=batch_size,
-            lr=learning_rate,
-            optimizer=optimizer,
-        )
+        model.test(test_env, policy, online_training_period, learning_rate, optimizer)

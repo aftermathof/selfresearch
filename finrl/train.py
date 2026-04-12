@@ -17,7 +17,7 @@ from finrl.meta.env_portfolio_optimization.env_portfolio_optimization import (
     PortfolioOptimizationEnv,
 )
 from finrl.agents.portfolio_optimization.models import DRLAgent
-from finrl.agents.portfolio_optimization.architectures import EIIE
+from FinRL.finrl.agents.portfolio_optimization.architectures_changed import EIIE
 import finrl.agents.portfolio_optimization.algorithms as algo_mod
 
 
@@ -26,10 +26,11 @@ import finrl.agents.portfolio_optimization.algorithms as algo_mod
 # =========================
 INITIAL_AMOUNT = 1_000_000
 TIME_WINDOW = 50
-EPISODES = 10
-LR = 1e-4 
+EPISODES = 5
+LR = 1e-4
 BATCH_SIZE = 64
-COMISSION_FEE_PCT = 0.002
+# COMISSION_FEE_PCT = 0.002
+COMISSION_FEE_PCT = 0
 SEED = 42
 
 FEATURES = [
@@ -285,6 +286,15 @@ def make_env(df: pd.DataFrame, cwd: str = "./") -> PackedStateEnv:
     env = PackedStateEnv(base_env)
     return env
 
+def sample_train_window(df: pd.DataFrame, window_days: int = 365) -> pd.DataFrame:
+    """从训练集随机采样一段连续时间窗口."""
+    dates = sorted(df["date"].unique())
+    max_start = len(dates) - window_days
+    if max_start <= 0:
+        return df
+    start_idx = random.randint(0, max_start)
+    selected_dates = dates[start_idx: start_idx + window_days]
+    return df[df["date"].isin(selected_dates)].copy()
 
 train_env = make_env(train_df)
 
@@ -507,8 +517,27 @@ best_episode = -1
 history = []
 
 print("\nStart training...")
+# for ep in range(EPISODES):
+#     # 每个 episode 随机采样一段训练数据
+#     episode_df = sample_train_window(train_df, window_days=365)
+#     episode_env = make_env(episode_df)
+    
+#     # 用新环境替换 agent 和 model 的训练环境
+#     trained_model.train_env = episode_env
+#     trained_model.train_pvm = algo_mod.PVM(
+#         episode_env.episode_length, episode_env.portfolio_size
+#     )
+#     trained_model.train_buffer = algo_mod.ReplayBuffer(capacity=BATCH_SIZE)
+#     from torch.utils.data import DataLoader
+#     from finrl.agents.portfolio_optimization.utils import RLDataset
+#     dataset = RLDataset(trained_model.train_buffer)
+#     trained_model.train_dataloader = DataLoader(
+#         dataset=dataset, batch_size=BATCH_SIZE, shuffle=False, pin_memory=True
+#     )
+
+#     with contextlib.redirect_stdout(io.StringIO()):
+#         trained_model = agent.train_model(model=trained_model, episodes=1)
 for ep in range(EPISODES):
-    # 训练 1 个 episode
     with contextlib.redirect_stdout(io.StringIO()):
         trained_model = agent.train_model(model=trained_model, episodes=1)
 

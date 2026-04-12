@@ -13,10 +13,10 @@ from torch_geometric.utils import to_dense_batch
 class EIIE(nn.Module):
     def __init__(
         self,
-        initial_features=13,
+        initial_features=3,
         k_size=3,
-        conv_mid_features=8,
-        conv_final_features=32,
+        conv_mid_features=2,
+        conv_final_features=20,
         time_window=50,
         device="cpu",
     ):
@@ -80,7 +80,8 @@ class EIIE(nn.Module):
         last_action = last_action.to(self.device).float()
 
         last_stocks, cash_bias = self._process_last_action(last_action)
-        
+        cash_bias = torch.zeros_like(cash_bias).to(self.device)
+
         output = self.sequential(observation)  # shape [N, 20, PORTFOLIO_SIZE, 1]
         output = torch.cat(
             [last_stocks, output], dim=1
@@ -95,8 +96,8 @@ class EIIE(nn.Module):
         output = torch.squeeze(output, 3)
         output = torch.squeeze(output, 1)  # shape [N, PORTFOLIO_SIZE + 1]
 
-        temperature = 1
-        output = torch.softmax(output / temperature, dim=1)
+        output = self.softmax(output)
+
         return output
 
     def forward(self, observation, last_action):
