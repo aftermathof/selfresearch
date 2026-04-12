@@ -51,7 +51,7 @@ FEATURE_COLS = [
     "dx_30",
     "close_30_sma",
     "close_60_sma",
-    "vol_ratio20",
+    "volume",
     "r1",
     "r5",
     "r10",
@@ -59,7 +59,6 @@ FEATURE_COLS = [
     "intraday",
     "overnight",
     "range",
-    "turbulence"
 ]
 
 META_COLS = ["date", "tic"]   # 非特征列，保留用于重构
