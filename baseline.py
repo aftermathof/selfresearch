@@ -3,6 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
 import os
 
 output_dir = "baseline_results"
@@ -290,16 +291,78 @@ ew_weights.to_csv(os.path.join(output_dir, "equal_weight_weights.csv"), encoding
 bs_weights.to_csv(os.path.join(output_dir, "best_stock_weights.csv"), encoding="utf-8-sig")
 
 # 画资金曲线
-plt.figure(figsize=(12, 6))
-plt.plot(bh_curve.index, bh_curve.values, label="Buy and Hold")
-plt.plot(ew_curve.index, ew_curve.values, label="Equal Weight")
-plt.plot(bs_curve.index, bs_curve.values, label=f"Best Stock ({best_ticker})")
-plt.title("Baseline Portfolio Value Curves")
-plt.xlabel("Date")
-plt.ylabel("Portfolio Value")
-plt.legend()
-plt.grid(True, alpha=0.3)
-plt.tight_layout()
-plt.savefig(os.path.join(output_dir, "baseline_curves.png"), dpi=300)
+plt.rcParams.update({
+    "font.family": "serif",
+    "font.serif": ["Times New Roman", "Times", "DejaVu Serif"],
+    "font.sans-serif": ["SimHei", "Microsoft YaHei", "DejaVu Sans"],
+    "mathtext.fontset": "stix",
+    "axes.unicode_minus": False,
+    "figure.dpi": 120,
+    "savefig.dpi": 400,
+    "font.size": 11,
+    "axes.labelsize": 12,
+    "axes.titlesize": 14,
+    "axes.titleweight": "semibold",
+    "xtick.labelsize": 9.5,
+    "ytick.labelsize": 9.5,
+    "legend.fontsize": 9.5,
+    "axes.linewidth": 0.9,
+    "grid.linewidth": 0.5,
+    "grid.alpha": 0.22,
+    "lines.linewidth": 2.0,
+})
+
+fig, ax = plt.subplots(figsize=(12.5, 5.6))
+
+ax.plot(
+    bh_curve.index,
+    bh_curve.values,
+    color="#4C72B0",
+    label="Buy and Hold",
+    zorder=3,
+)
+ax.plot(
+    ew_curve.index,
+    ew_curve.values,
+    color="#55A868",
+    label="Equal Weight",
+    zorder=3,
+)
+ax.plot(
+    bs_curve.index,
+    bs_curve.values,
+    color="#C44E52",
+    label=f"Best Stock ({best_ticker})",
+    zorder=3,
+)
+
+ax.set_title("Baseline Portfolio Value Comparison", pad=10)
+ax.set_xlabel("Date")
+ax.set_ylabel("Portfolio Value")
+
+ax.xaxis.set_major_locator(mdates.AutoDateLocator())
+ax.xaxis.set_major_formatter(mdates.ConciseDateFormatter(ax.xaxis.get_major_locator()))
+
+ax.grid(True, axis="y", linestyle="--", color="#B0B0B0")
+ax.set_axisbelow(True)
+
+ax.spines["top"].set_visible(False)
+ax.spines["right"].set_visible(False)
+ax.spines["left"].set_color("#444444")
+ax.spines["bottom"].set_color("#444444")
+ax.tick_params(axis="both", which="major", length=3.5, width=0.8, color="#444444")
+
+ax.legend(
+    loc="upper left",
+    frameon=True,
+    framealpha=0.95,
+    facecolor="white",
+    edgecolor="#D0D0D0",
+    borderpad=0.4,
+    handlelength=2.2,
+)
+
+fig.subplots_adjust(left=0.09, right=0.98, top=0.90, bottom=0.13)
+fig.savefig(os.path.join(output_dir, "baseline_curves.png"), bbox_inches="tight")
 plt.show()
 
