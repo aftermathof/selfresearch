@@ -1,0 +1,12 @@
+最优 Trial:
+  验证集 Sharpe: 3.3870
+  超参：
+    lr: 0.009966494603065989
+    batch_size: 128
+    time_window: 50
+    k_size: 2
+    conv_mid_features: 8
+    conv_final_features: 10
+
+所有 trial 结果已保存到 optuna_results.csv
+可视化已保存：optuna_history.html, optuna_importance.html
