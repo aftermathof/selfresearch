@@ -76,6 +76,8 @@ def objective(trial, df_train, df_val):
     conv_mid      = trial.suggest_categorical("conv_mid_features", [2, 4, 8])
     conv_final    = trial.suggest_categorical("conv_final_features", [10, 20, 32])
 
+    # action_noise  = trial.suggest_float("action_noise", 0.001, 0.1, log=True)
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     # ── 2. 构建环境 ───────────────────────────────────────────

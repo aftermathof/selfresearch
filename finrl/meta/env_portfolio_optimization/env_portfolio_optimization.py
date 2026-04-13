@@ -88,6 +88,7 @@ class PortfolioOptimizationEnv(gym.Env):
         tics_in_portfolio="all",
         time_window=1,
         cwd="./",
+        plot_graphs=True,
         new_gym_api=False,
     ):
         """Initializes environment's instance.
@@ -137,6 +138,7 @@ class PortfolioOptimizationEnv(gym.Env):
         self._features = features
         self._valuation_feature = valuation_feature
         self._cwd = Path(cwd)
+        self._plot_graphs = plot_graphs
         self._new_gym_api = new_gym_api
 
         # results file
@@ -235,26 +237,27 @@ class PortfolioOptimizationEnv(gym.Env):
             )
             metrics_df.set_index("date", inplace=True)
 
-            plt.plot(metrics_df["portfolio_values"], "r")
-            plt.title("Portfolio Value Over Time")
-            plt.xlabel("Time")
-            plt.ylabel("Portfolio value")
-            plt.savefig(self._results_file / "portfolio_value.png")
-            plt.close()
+            if self._plot_graphs:
+                plt.plot(metrics_df["portfolio_values"], "r")
+                plt.title("Portfolio Value Over Time")
+                plt.xlabel("Time")
+                plt.ylabel("Portfolio value")
+                plt.savefig(self._results_file / "portfolio_value.png")
+                plt.close()
 
-            plt.plot(self._portfolio_reward_memory, "r")
-            plt.title("Reward Over Time")
-            plt.xlabel("Time")
-            plt.ylabel("Reward")
-            plt.savefig(self._results_file / "reward.png")
-            plt.close()
+                plt.plot(self._portfolio_reward_memory, "r")
+                plt.title("Reward Over Time")
+                plt.xlabel("Time")
+                plt.ylabel("Reward")
+                plt.savefig(self._results_file / "reward.png")
+                plt.close()
 
-            plt.plot(self._actions_memory)
-            plt.title("Actions performed")
-            plt.xlabel("Time")
-            plt.ylabel("Weight")
-            plt.savefig(self._results_file / "actions.png")
-            plt.close()
+                plt.plot(self._actions_memory)
+                plt.title("Actions performed")
+                plt.xlabel("Time")
+                plt.ylabel("Weight")
+                plt.savefig(self._results_file / "actions.png")
+                plt.close()
 
             print("=================================")
             print("Initial portfolio value:{}".format(self._asset_memory["final"][0]))
@@ -272,11 +275,13 @@ class PortfolioOptimizationEnv(gym.Env):
             print("Sharpe ratio: {}".format(qs.stats.sharpe(metrics_df["returns"])))
             print("=================================")
 
-            qs.plots.snapshot(
-                metrics_df["returns"],
-                show=False,
-                savefig=self._results_file / "portfolio_summary.png",
-            )
+            if self._plot_graphs:
+                qs.plots.snapshot(
+                    metrics_df["returns"],
+                    show=False,
+                    savefig=self._results_file / "portfolio_summary.png",
+                )
+                plt.close("all")
 
             if self._new_gym_api:
                 return self._state, self._reward, self._terminal, False, self._info
