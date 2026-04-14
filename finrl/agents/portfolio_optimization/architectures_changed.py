@@ -130,6 +130,45 @@ class EIIE(nn.Module):
         return last_stocks, cash_bias
 
 
+class EIIE_NoLastAction(EIIE):
+    """EIIE消融实验：固定last_action为1/N均匀权重。
+    
+    网络结构与原始EIIE完全一致（in_channels=conv_final_features+1），
+    只将last_action强制替换为1/N均匀分配，其余不变。
+    """
+
+    def mu(self, observation, last_action):
+        if isinstance(observation, np.ndarray):
+            observation = torch.from_numpy(observation)
+        observation = observation.to(self.device).float()
+
+        if isinstance(last_action, np.ndarray):
+            last_action = torch.from_numpy(last_action)
+        last_action = last_action.to(self.device).float()
+
+        # 强制将 last_action 替换为 1/N 均匀权重
+        n_assets = last_action.shape[1]          # portfolio_size + 1（含cash）
+        ew_action = torch.full_like(last_action, 1.0 / n_assets)
+        last_stocks, cash_bias = self._process_last_action(ew_action)
+        cash_bias = torch.zeros_like(cash_bias).to(self.device)
+
+        output = self.sequential(observation)
+        output = torch.cat([last_stocks, output], dim=1)
+        output = self.final_convolution(output)
+        output = torch.cat([cash_bias, output], dim=2)
+
+        output = torch.squeeze(output, 3)
+        output = torch.squeeze(output, 1)
+
+        output = self.softmax(output)
+
+        return output
+
+    def forward(self, observation, last_action):
+        mu = self.mu(observation, last_action)
+        action = mu.cpu().detach().numpy().squeeze()
+        return action    
+
 class EI3(nn.Module):
     def __init__(
         self,
@@ -240,8 +279,8 @@ class EI3(nn.Module):
         output = torch.squeeze(output, 3)
         output = torch.squeeze(output, 1)  # shape [N, PORTFOLIO_SIZE + 1]
 
-        temperature = 1
-        output = torch.softmax(output / temperature, dim=1)
+        output = self.softmax(output)
+
         return output
 
     def forward(self, observation, last_action):

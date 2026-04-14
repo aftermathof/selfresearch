@@ -256,7 +256,7 @@ class PolicyGradient:
         #    熵越大，分布越平滑
         # -----------------------------
         entropy = -torch.sum(mu * torch.log(mu + 1e-8), dim=1).mean()
-        entropy_coef = 5e-2
+        entropy_coef = 5e-3
 
         # -----------------------------
         # 3) 调仓平滑正则：惩罚和上一期权重差太大
