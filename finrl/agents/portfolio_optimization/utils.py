@@ -7,7 +7,6 @@ from random import random
 import numpy as np
 from torch.utils.data.dataset import IterableDataset
 
-
 class PVM:
     def __init__(self, capacity, portfolio_size):
         """Initializes portfolio vector memory.
