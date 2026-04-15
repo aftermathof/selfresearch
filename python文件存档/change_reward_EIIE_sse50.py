@@ -1,6 +1,6 @@
-# Auto-generated from change_reward_EIIE_sse50.ipynb
+# Generated from change_reward_EIIE_sse50.ipynb
 
-# %% [markdown] cell 1
+# %% [markdown]
 # # EIIE Portfolio Optimization on an SSE 50 Stock Subset
 #
 # This notebook implements a complete portfolio optimization experiment based on FinRL's `PortfolioOptimizationEnv` and the EIIE architecture. The current version is no longer a generic demo notebook: it has been adapted to a Chinese equity setting using a fixed subset of SSE 50 constituents and a train-validation-test workflow with early stopping.
@@ -20,14 +20,14 @@
 #
 # The portfolio environment used here is provided by FinRL's Portfolio Optimization Environment (POE). If you use this workflow in research, it is also appropriate to cite the POE paper together with FinRL-related references.
 
-# %% [markdown] cell 2
+# %% [markdown]
 # ## 1. Installation and Imports
 #
 # The next few cells contain optional installation commands and the Python imports required for data processing, environment construction, model training, evaluation, and figure generation.
 #
 # If you are running locally in an environment where FinRL and its dependencies are already installed, the installation cells can remain commented out.
 
-# %% cell 3
+# %%
 ## Hide matplotlib warnings
 # import warnings
 # warnings.filterwarnings('ignore')
@@ -35,12 +35,12 @@
 import logging
 logging.getLogger('matplotlib.font_manager').disabled = True
 
-# %% [markdown] cell 4
+# %% [markdown]
 # ### 1.1 Load the Required Libraries
 #
 # This section imports the core libraries used throughout the notebook, including PyTorch, NumPy, pandas-compatible utilities from FinRL, and the portfolio optimization environment.
 
-# %% cell 5
+# %%
 import torch
 import random
 import numpy as np
@@ -113,22 +113,22 @@ set_seed(SEED)
 device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
 
 
-# %% [markdown] cell 6
+# %% [markdown]
 # ## 2. Data Preparation
 #
 # Instead of reproducing the original cryptocurrency setting in Jiang et al., this notebook uses a manually selected subset of SSE 50 stocks. The ticker list is fixed in the code so that the experiment remains reproducible across training and testing stages.
 #
 # The data are downloaded from Yahoo Finance over the 2014-01-01 to 2025-12-31 period. After download, the notebook keeps the market data needed by the environment and later uses yearly slices for out-of-sample evaluation.
 
-# %% cell 7
+# %%
 TOP_BRL = ["601012.SS","600887.SS","600030.SS","600031.SS","600036.SS","600276.SS","600519.SS", 
 "601318.SS","600703.SS","601166.SS", ]
 
-# %% cell 8
+# %%
 %env HTTP_PROXY=http://127.0.0.1:7897
 %env HTTPS_PROXY=http://127.0.0.1:7897
 
-# %% cell 9
+# %%
 print(len(TOP_BRL))
 
 portfolio_raw_df = YahooDownloader(start_date = '2014-01-01',
@@ -136,7 +136,7 @@ portfolio_raw_df = YahooDownloader(start_date = '2014-01-01',
                                 ticker_list = TOP_BRL).fetch_data()
 portfolio_raw_df
 
-# %% cell 10
+# %%
 from finrl.meta.preprocessor.preprocessors import FeatureEngineer
 
 fe = FeatureEngineer(
@@ -149,12 +149,12 @@ fe = FeatureEngineer(
 portfolio_raw_df = fe.preprocess_data(portfolio_raw_df.copy())
 portfolio_raw_df
 
-# %% [markdown] cell 11
+# %% [markdown]
 # ### 2.1 Normalize Price Features
 #
 # Before the environment is constructed, the raw market features are normalized within each ticker group. This keeps different assets on comparable numerical scales while preserving the time-series structure of each stock.
 
-# %% [markdown] cell 12
+# %% [markdown]
 # The notebook applies `GroupByScaler(by="tic", scaler=MaxAbsScaler)` to the downloaded dataframe. In other words, each stock is scaled independently by its own maximum absolute value, so the normalized `close`, `high`, and `low` series fall into a comparable range across assets.
 #
 # After normalization, the data are split as follows:
@@ -165,7 +165,7 @@ portfolio_raw_df
 #
 # These slices are later used to create separate portfolio environments for model selection and evaluation.
 
-# %% cell 13
+# %%
 import numpy as np
 import pandas as pd
 
@@ -204,7 +204,7 @@ def add_custom_features(df: pd.DataFrame) -> pd.DataFrame:
 
     return df
 
-# %% cell 14
+# %%
 df_portfolio = portfolio_raw_df[["date", "tic", "open", "close", "high", "low", "volume", "macd", "rsi_30", "cci_30", "dx_30"]]
 df_portfolio = add_custom_features(df_portfolio)
 
@@ -219,7 +219,7 @@ for col in feature_cols:
     ).fit_transform(df_portfolio[["tic", col]])[col]
 df_portfolio
 
-# %% cell 15
+# %%
 # 训练集：2014-2021
 df_portfolio_train = df_portfolio[
     (df_portfolio["date"] >= "2014-01-30") & 
@@ -248,14 +248,14 @@ df_portfolio_2025 = df_portfolio[
     (df_portfolio["date"] < "2026-01-01")
 ]
 
-# %% [markdown] cell 16
+# %% [markdown]
 # ## 3. Environment Construction
 #
 # This section instantiates the FinRL `PortfolioOptimizationEnv` for both training and validation. The environment uses the normalized dataframe, a rolling window of 50 trading days, and the three price-related features `close`, `high`, and `low`.
 #
 # The training and validation environments share the same configuration so that model selection is performed under the same state and transaction-cost assumptions.
 
-# %% cell 17
+# %%
 environment = PortfolioOptimizationEnv(
         df_portfolio_train,
         initial_amount=100000,
@@ -275,7 +275,7 @@ environment_val = PortfolioOptimizationEnv(
         normalize_df=None
 )
 
-# %% [markdown] cell 18
+# %% [markdown]
 # ## 4. Model Definition
 #
 # The agent is built with FinRL's policy-gradient interface and the EIIE architecture. The model configuration in this notebook uses:
@@ -287,9 +287,9 @@ environment_val = PortfolioOptimizationEnv(
 #
 # A key consistency requirement is that the policy's `time_window` must match the environment's `time_window`.
 
-# %% cell 19
+# %%
 model_kwargs = {
-    "lr": 0.01,
+    "lr": 0.005,
     "batch_size": 128,
     "action_noise": 0,
     "dsr_coef": 0.05,
@@ -315,14 +315,14 @@ model = DRLAgent(environment).get_model(
     policy_kwargs=policy_kwargs,
 )
 
-# %% [markdown] cell 20
+# %% [markdown]
 # ## 5. Training with Validation-Based Early Stopping
 #
 # The official single-call training routine is replaced here with an explicit episode-by-episode loop. After each training episode, the policy is evaluated on the validation environment and the validation Sharpe ratio is recorded.
 #
 # The best checkpoint is saved whenever the validation Sharpe improves. Training stops early if the validation metric does not improve for a fixed number of consecutive episodes. This makes the notebook closer to a practical research workflow than a one-shot demo.
 
-# %% cell 21
+# %%
 import torch
 import numpy as np
 import matplotlib.pyplot as plt
@@ -369,7 +369,7 @@ def calculate_metrics(value_list, risk_free_rate=0, periods_per_year=252):
 
 # ── Early Stop 配置 ──────────────────────────────────────
 MAX_EPISODES   = 20    # 最大训练轮数（可根据算力调整）
-PATIENCE       = 5   # 连续多少轮验证集无改善则停止
+PATIENCE       = 3    # 连续多少轮验证集无改善则停止
 SAVE_PATH      = "policy_EIIE_change_reward_best.pt"
 
 # ── 训练状态 ─────────────────────────────────────────────
@@ -415,7 +415,7 @@ for episode in range(1, MAX_EPISODES + 1):
         print(f"   最优轮次：第{best_episode}轮 | 验证集 Sharpe：{best_val_sharpe:.4f}")
         break
 
-# %% cell 22
+# %%
 policy = EIIE(
     initial_features=12,
     k_size=2,
@@ -427,7 +427,7 @@ policy = EIIE(
 policy.load_state_dict(torch.load(SAVE_PATH))
 print(f"已加载最优模型（来自第{best_episode}轮，验证集 Sharpe = {best_val_sharpe:.4f}）")
 
-# %% cell 23
+# %%
 %config InlineBackend.figure_format = 'retina'
 
 import os
@@ -601,17 +601,17 @@ fig.savefig(png_path, bbox_inches="tight")
 plt.show()
 print("Training curves saved to:", png_path)
 
-# %% [markdown] cell 24
+# %% [markdown]
 # ## 6. Out-of-Sample Evaluation
 #
 # The trained EIIE policy is evaluated on multiple unseen yearly periods. This allows us to examine how performance evolves as the test window moves further away from the training period.
 
-# %% [markdown] cell 25
+# %% [markdown]
 # ### 6.1 Instantiate Yearly Test Environments
 #
 # Three independent portfolio environments are created for 2023, 2024, and 2025. All of them use the same transaction-cost setting, feature set, and time-window length as the training environment, which keeps the out-of-sample comparison consistent.
 
-# %% cell 26
+# %%
 environment_2023 = PortfolioOptimizationEnv(
     df_portfolio_2023,
     initial_amount=100000,
@@ -639,7 +639,7 @@ environment_2025 = PortfolioOptimizationEnv(
     normalize_df=None
 )
 
-# %% [markdown] cell 27
+# %% [markdown]
 # ### 6.2 Evaluate the EIIE Policy
 #
 # In this section, the notebook loads the saved best policy and runs it on each yearly test environment. For every test period, it stores three outputs:
@@ -650,7 +650,7 @@ environment_2025 = PortfolioOptimizationEnv(
 #
 # These stored results are later reused for the comparative figures.
 
-# %% cell 28
+# %%
 import numpy as np
 
 EIIE_results = {
@@ -687,14 +687,14 @@ for year, env in [("2023", environment_2023),
         "turnover": turnover,
     }
 
-# %% [markdown] cell 29
+# %% [markdown]
 # ### 6.3 Equal-Weight Benchmark
 #
 # To provide a simple baseline, the notebook also evaluates an equal-weight strategy under the same environments. The benchmark keeps zero cash and allocates the same weight to every stock at every step.
 #
 # This gives a transparent reference for judging whether the learned EIIE policy improves upon a naive diversified allocation.
 
-# %% cell 30
+# %%
 EW_results = {
     "train": {},
     "validation": {},
@@ -745,7 +745,7 @@ while not terminated:
     _, _, terminated, _ = environment_2025.step(action)
 EW_results["2025"]["value"] = environment_2025._asset_memory["final"]
 
-# %% [markdown] cell 31
+# %% [markdown]
 # ## 7. Performance Figures
 #
 # The following cells generate publication-style visualizations for the training period and the out-of-sample test periods. The figures compare EIIE with the equal-weight benchmark and summarize the model's behavior from three complementary perspectives:
@@ -754,7 +754,7 @@ EW_results["2025"]["value"] = environment_2025._asset_memory["final"]
 # - turnover;
 # - portfolio weights.
 
-# %% cell 32
+# %%
 import os
 import numpy as np
 import matplotlib.pyplot as plt
@@ -880,7 +880,7 @@ plot_portfolio_value(
     save_name="value_2025"
 )
 
-# %% cell 33
+# %%
 import os
 import numpy as np
 import matplotlib.pyplot as plt
@@ -975,14 +975,14 @@ fig.savefig(os.path.join(output_dir, "portfolio_performance_comparison.png"), bb
 
 plt.show()
 
-# %% [markdown] cell 34
+# %% [markdown]
 # ### 7.1 Turnover Comparison
 #
 # Turnover is computed from the day-to-day change in the non-cash asset weights. The multi-panel figure below reports the turnover sequence for 2023, 2024, and 2025, together with the average turnover in each year.
 #
 # This helps assess how aggressively the learned strategy trades and whether trading activity changes across different market regimes.
 
-# %% cell 35
+# %%
 %config InlineBackend.figure_format = "retina"
 
 import os
@@ -1108,19 +1108,19 @@ with plt.style.context(["science", "no-latex"]):
 
     plt.show()
 
-# %% [markdown] cell 36
+# %% [markdown]
 # The portfolio-value and turnover plots should be read jointly. The value curves describe the investment outcome, while the turnover figure provides a trading-intensity explanation for that outcome.
 #
 # If performance deteriorates as the test period moves further away from the training window, that is a sign of temporal distribution shift rather than a plotting artifact. In that case, retraining with a more recent rolling window or expanding the feature set would be a natural next step.
 
-# %% [markdown] cell 37
+# %% [markdown]
 # ### 7.2 Portfolio Weight Visualization
 #
 # The final section visualizes the EIIE allocation weights. The notebook first keeps a simple single-year plotting version for inspection, and then uses a three-panel publication-style figure to summarize the dominant allocations in 2023, 2024, and 2025.
 #
 # Non-dominant assets are faded into the background, while the largest average allocations remain highlighted. This makes the concentration pattern of the strategy much easier to interpret.
 
-# %% cell 38
+# %%
 import os
 import numpy as np
 import pandas as pd
@@ -1301,7 +1301,7 @@ plot_actions_triptych(
     y_max=0.7
 )
 
-# %% cell 39
+# %%
 import os
 import numpy as np
 import pandas as pd

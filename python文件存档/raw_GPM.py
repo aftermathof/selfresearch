@@ -1,6 +1,6 @@
-# Auto-generated from raw_GPM.ipynb
+# Generated from raw_GPM.ipynb
 
-# %% [markdown] cell 1
+# %% [markdown]
 # # A guide Portfolio Optimization Environment
 #
 # This notebook aims to provide an example of using PortfolioOptimizationEnv (or POE) to train a reinforcement learning model that learns to solve the portfolio optimization problem.
@@ -34,12 +34,12 @@
 #
 # ```
 
-# %% [markdown] cell 2
+# %% [markdown]
 # ## Installation and imports
 #
 # To run this notebook in google colab, uncomment the cells below.
 
-# %% cell 3
+# %%
 ## Hide matplotlib warnings
 # import warnings
 # warnings.filterwarnings('ignore')
@@ -47,10 +47,10 @@
 import logging
 logging.getLogger('matplotlib.font_manager').disabled = True
 
-# %% [markdown] cell 4
+# %% [markdown]
 # #### Import the necessary code libraries
 
-# %% cell 5
+# %%
 import torch
 
 from sklearn.preprocessing import MaxAbsScaler
@@ -122,7 +122,7 @@ set_seed(SEED)
 
 device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
 
-# %% [markdown] cell 6
+# %% [markdown]
 # ## Fetch data
 #
 # In his paper, *Jiang et al* creates a portfolio composed by the top-11 cryptocurrencies based on 30-days volume. Since it's not specified when this classification was done, it's difficult to reproduce, so we will use a similar approach in the Brazillian stock market:
@@ -130,7 +130,7 @@ device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
 # - We select top-10 stocks from Brazillian stock market;
 # - For simplicity, we disconsider stocks that have missing data for the days in period 2011-01-01 to 2019-12-31 (9 years);
 
-# %% cell 7
+# %%
 TOP_BRL = [
         "601012.SS",
         "600887.SS",
@@ -144,11 +144,11 @@ TOP_BRL = [
         "601166.SS", 
     ]
 
-# %% cell 8
+# %%
 %env HTTP_PROXY=http://127.0.0.1:7897
 %env HTTPS_PROXY=http://127.0.0.1:7897
 
-# %% cell 9
+# %%
 print(len(TOP_BRL))
 
 portfolio_raw_df = YahooDownloader(start_date = '2014-01-01',
@@ -156,20 +156,20 @@ portfolio_raw_df = YahooDownloader(start_date = '2014-01-01',
                                 ticker_list = TOP_BRL).fetch_data()
 portfolio_raw_df
 
-# %% cell 10
+# %%
 portfolio_raw_df.groupby("tic").count()
 
-# %% [markdown] cell 11
+# %% [markdown]
 # ### Normalize Data
 
-# %% [markdown] cell 12
+# %% [markdown]
 # We normalize the data dividing the time series of each stock by its maximum value, so that the dataframe contains values between 0 and 1.
 
-# %% cell 13
+# %%
 portfolio_norm_df = GroupByScaler(by="tic", scaler=MaxAbsScaler).fit_transform(portfolio_raw_df)
 portfolio_norm_df
 
-# %% cell 14
+# %%
 df_portfolio = portfolio_norm_df[["date", "tic", "close", "high", "low"]]
 
 # 训练集：2014-2021
@@ -200,12 +200,12 @@ df_portfolio_2025 = df_portfolio[
     (df_portfolio["date"] < "2026-01-01")
 ]
 
-# %% [markdown] cell 15
+# %% [markdown]
 # ### Instantiate Environment
 #
 # Using the `PortfolioOptimizationEnv`, it's easy to instantiate a portfolio optimization environment for reinforcement learning agents. In the example below, we use the dataframe created before to start an environment.
 
-# %% cell 16
+# %%
 environment = PortfolioOptimizationEnv(
         df_portfolio_train,
         initial_amount=100000,
@@ -225,14 +225,14 @@ environment_val = PortfolioOptimizationEnv(
         normalize_df=None
 )
 
-# %% [markdown] cell 17
+# %% [markdown]
 # ### Instantiate Model
 #
 # Now, we can instantiate the model using FinRL API. In this example, we are going to use the EI3 architecture introduced by Jiang et. al.
 #
 # :exclamation: **Note:** Remember to set the architecture's `time_window` parameter with the same value of the environment's `time_window`.
 
-# %% cell 18
+# %%
 import numpy as np
 import torch
 
@@ -263,7 +263,7 @@ print(f"节点数: {N}")
 print(f"边数: {edge_index.shape[1]}")  # 应该是 10*9=90
 print(f"关系类型数: {np.unique(edge_type)}")
 
-# %% cell 19
+# %%
 # set PolicyGradient parameters
 model_kwargs = {
     "lr": 0.001,
@@ -287,10 +287,10 @@ policy_kwargs = {
 
 model = DRLAgent(environment).get_model("pg", device, model_kwargs, policy_kwargs)
 
-# %% [markdown] cell 20
+# %% [markdown]
 # ### Train Model
 
-# %% cell 21
+# %%
 import torch
 import numpy as np
 import matplotlib.pyplot as plt
@@ -394,7 +394,7 @@ policy.load_state_dict(torch.load(SAVE_PATH))
 print(f"已加载最优模型（来自第{best_episode}轮，验证集 Sharpe = {best_val_sharpe:.4f}）")
 
 
-# %% cell 22
+# %%
 import matplotlib.pyplot as plt
 import matplotlib.font_manager as fm
 import os
@@ -564,15 +564,15 @@ fig.savefig(png_path, bbox_inches="tight")
 plt.show()
 print("Training curves saved to:", png_path)
 
-# %% [markdown] cell 23
+# %% [markdown]
 # ## Test Model
 
-# %% [markdown] cell 24
+# %% [markdown]
 # ### Instantiate different environments
 #
 # Since we have three different periods of time, we need three different environments instantiated to simulate them.
 
-# %% cell 25
+# %%
 environment_2023 = PortfolioOptimizationEnv(
     df_portfolio_2023,
     initial_amount=100000,
@@ -600,11 +600,11 @@ environment_2025 = PortfolioOptimizationEnv(
     normalize_df=None
 )
 
-# %% [markdown] cell 26
+# %% [markdown]
 # ### Test EI3 architecture
 # Now, we can test the EI3 architecture in the three different test periods. It's important no note that, in this code, we load the saved policy even though it's not necessary just to show how to save and load your model.
 
-# %% cell 27
+# %%
 import numpy as np
 
 GPM_results = {
@@ -643,11 +643,11 @@ for year, env in [("2023", environment_2023),
         "turnover": turnover
     }
 
-# %% [markdown] cell 28
+# %% [markdown]
 # ### Test Uniform Buy and Hold
 # For comparison, we will also test the performance of a uniform buy and hold strategy. In this strategy, the portfolio has no remaining cash and the same percentage of money is allocated in each asset.
 
-# %% cell 29
+# %%
 EW_results = {
     "train": {},
     "validation": {},
@@ -698,10 +698,10 @@ while not terminated:
     _, _, terminated, _ = environment_2025.step(action)
 EW_results["2025"]["value"] = environment_2025._asset_memory["final"]
 
-# %% [markdown] cell 30
+# %% [markdown]
 # ### Plot graphics
 
-# %% cell 31
+# %%
 import matplotlib.pyplot as plt
 %matplotlib inline 
 import os
@@ -825,10 +825,10 @@ plot_portfolio_value(
     save_name="value_2025"
 )
 
-# %% [markdown] cell 32
+# %% [markdown]
 # We can see that the agent is able to learn a good policy but its performance is worse the more the test period advances into the future. To get a better performance in 2022, for example, the agent should probably be trained again using more recent data.
 
-# %% cell 33
+# %%
 import os
 import numpy as np
 import matplotlib.pyplot as plt
@@ -923,7 +923,7 @@ fig.savefig(os.path.join(output_dir, "portfolio_performance_comparison.png"), bb
 
 plt.show()
 
-# %% cell 34
+# %%
 %config InlineBackend.figure_format = "retina"
 
 import os
@@ -1049,7 +1049,7 @@ with plt.style.context(["science", "no-latex"]):
 
     plt.show()
 
-# %% cell 35
+# %%
 import os
 import numpy as np
 import pandas as pd
@@ -1230,7 +1230,7 @@ plot_actions_triptych(
     y_max=0.22
 )
 
-# %% cell 36
+# %%
 import os
 import numpy as np
 import pandas as pd

@@ -8,8 +8,7 @@ from sklearn.base import BaseEstimator
 from sklearn.base import TransformerMixin
 from sklearn.preprocessing import MaxAbsScaler
 from stockstats import StockDataFrame as Sdf
-
-from finrl import config
+from finrl.meta.preprocessor.config import INDICATORS
 from finrl.meta.preprocessor.yahoodownloader import YahooDownloader
 
 
@@ -127,13 +126,13 @@ class FeatureEngineer:
     def __init__(
         self,
         use_technical_indicator=True,
-        tech_indicator_list=config.INDICATORS,
+        tech_indicator_list=None,
         use_vix=False,
         use_turbulence=False,
         user_defined_feature=False,
     ):
         self.use_technical_indicator = use_technical_indicator
-        self.tech_indicator_list = tech_indicator_list
+        self.tech_indicator_list = tech_indicator_list or INDICATORS
         self.use_vix = use_vix
         self.use_turbulence = use_turbulence
         self.user_defined_feature = user_defined_feature

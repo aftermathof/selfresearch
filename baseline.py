@@ -241,82 +241,82 @@ def run_best_stock_out_of_sample(
     return value_series, weight_df, best_ticker
 
 
-# =========================
-# 6. Baseline 4: Minimum Variance
-#    用 train_data1 估计协方差，在 trade_data1 固定权重持有
-# =========================
-def solve_min_variance_weights(train_prices: pd.DataFrame) -> pd.Series:
-    returns = train_prices.pct_change().dropna()
-    cov = returns.cov().values
-    n_assets = cov.shape[0]
+# # =========================
+# # 6. Baseline 4: Minimum Variance
+# #    用 train_data1 估计协方差，在 trade_data1 固定权重持有
+# # =========================
+# def solve_min_variance_weights(train_prices: pd.DataFrame) -> pd.Series:
+#     returns = train_prices.pct_change().dropna()
+#     cov = returns.cov().values
+#     n_assets = cov.shape[0]
 
-    if n_assets == 0:
-        raise ValueError("训练集为空，无法估计最小方差组合。")
+#     if n_assets == 0:
+#         raise ValueError("训练集为空，无法估计最小方差组合。")
 
-    if minimize is not None:
-        def portfolio_variance(weights: np.ndarray) -> float:
-            return float(weights @ cov @ weights)
+#     if minimize is not None:
+#         def portfolio_variance(weights: np.ndarray) -> float:
+#             return float(weights @ cov @ weights)
 
-        constraints = ({"type": "eq", "fun": lambda w: np.sum(w) - 1.0},)
-        bounds = [(0.0, 1.0)] * n_assets
-        x0 = np.full(n_assets, 1.0 / n_assets)
+#         constraints = ({"type": "eq", "fun": lambda w: np.sum(w) - 1.0},)
+#         bounds = [(0.0, 1.0)] * n_assets
+#         x0 = np.full(n_assets, 1.0 / n_assets)
 
-        result = minimize(
-            portfolio_variance,
-            x0=x0,
-            method="SLSQP",
-            bounds=bounds,
-            constraints=constraints,
-        )
-        if result.success:
-            weights = result.x
-        else:
-            weights = x0
-    else:
-        inv_cov = np.linalg.pinv(cov)
-        ones = np.ones(n_assets)
-        weights = inv_cov @ ones
-        weights = np.clip(weights, 0.0, None)
-        if weights.sum() == 0:
-            weights = np.full(n_assets, 1.0 / n_assets)
-        else:
-            weights = weights / weights.sum()
+#         result = minimize(
+#             portfolio_variance,
+#             x0=x0,
+#             method="SLSQP",
+#             bounds=bounds,
+#             constraints=constraints,
+#         )
+#         if result.success:
+#             weights = result.x
+#         else:
+#             weights = x0
+#     else:
+#         inv_cov = np.linalg.pinv(cov)
+#         ones = np.ones(n_assets)
+#         weights = inv_cov @ ones
+#         weights = np.clip(weights, 0.0, None)
+#         if weights.sum() == 0:
+#             weights = np.full(n_assets, 1.0 / n_assets)
+#         else:
+#             weights = weights / weights.sum()
 
-    return pd.Series(weights, index=train_prices.columns, name="Minimum_Variance")
+#     return pd.Series(weights, index=train_prices.columns, name="Minimum_Variance")
 
 
-def run_min_variance_out_of_sample(
-    train_prices: pd.DataFrame,
-    trade_prices: pd.DataFrame,
-    initial_cash: float = 1_000_000,
-) -> tuple[pd.Series, pd.DataFrame, pd.Series]:
-    common_tickers = sorted(set(train_prices.columns).intersection(set(trade_prices.columns)))
-    if len(common_tickers) == 0:
-        raise ValueError("train 和 trade 没有共同股票，无法做 Minimum Variance。")
+# def run_min_variance_out_of_sample(
+#     train_prices: pd.DataFrame,
+#     trade_prices: pd.DataFrame,
+#     initial_cash: float = 1_000_000,
+# ) -> tuple[pd.Series, pd.DataFrame, pd.Series]:
+#     common_tickers = sorted(set(train_prices.columns).intersection(set(trade_prices.columns)))
+#     if len(common_tickers) == 0:
+#         raise ValueError("train 和 trade 没有共同股票，无法做 Minimum Variance。")
 
-    train_sub = train_prices[common_tickers].copy()
-    trade_sub = trade_prices[common_tickers].copy()
+#     train_sub = train_prices[common_tickers].copy()
+#     trade_sub = trade_prices[common_tickers].copy()
 
-    weights = solve_min_variance_weights(train_sub).reindex(trade_sub.columns)
+#     weights = solve_min_variance_weights(train_sub).reindex(trade_sub.columns)
 
-    first_prices = trade_sub.iloc[0].values
-    shares = (initial_cash * weights.values) / first_prices
+#     first_prices = trade_sub.iloc[0].values
+#     shares = (initial_cash * weights.values) / first_prices
 
-    portfolio_values = (trade_sub.values * shares).sum(axis=1)
-    drifted_weights = (trade_sub.values * shares) / portfolio_values.reshape(-1, 1)
+#     portfolio_values = (trade_sub.values * shares).sum(axis=1)
+#     drifted_weights = (trade_sub.values * shares) / portfolio_values.reshape(-1, 1)
 
-    value_series = pd.Series(
-        portfolio_values,
-        index=trade_sub.index,
-        name="Minimum_Variance",
-    )
-    weight_df = pd.DataFrame(
-        drifted_weights,
-        index=trade_sub.index,
-        columns=trade_sub.columns,
-    )
+#     value_series = pd.Series(
+#         portfolio_values,
+#         index=trade_sub.index,
+#         name="Minimum_Variance",
+#     )
+#     weight_df = pd.DataFrame(
+#         drifted_weights,
+#         index=trade_sub.index,
+#         columns=trade_sub.columns,
+#     )
 
-    return value_series, weight_df, weights
+#     return value_series, weight_df, weights
 
 
 # =========================
@@ -344,28 +344,28 @@ ew_curve, ew_weights = run_equal_weight_rebalanced(trade_prices, INITIAL_CASH)
 bs_curve, bs_weights, best_ticker = run_best_stock_out_of_sample(
     train_prices, trade_prices, INITIAL_CASH
 )
-mv_curve, mv_weights, mv_target_weights = run_min_variance_out_of_sample(
-    train_prices, trade_prices, INITIAL_CASH
-)
+# mv_curve, mv_weights, mv_target_weights = run_min_variance_out_of_sample(
+#     train_prices, trade_prices, INITIAL_CASH
+# )
 
 # 计算绩效
 bh_metrics = calculate_metrics(bh_curve, RISK_FREE_RATE, PERIODS_PER_YEAR)
 ew_metrics = calculate_metrics(ew_curve, RISK_FREE_RATE, PERIODS_PER_YEAR)
 bs_metrics = calculate_metrics(bs_curve, RISK_FREE_RATE, PERIODS_PER_YEAR)
-mv_metrics = calculate_metrics(mv_curve, RISK_FREE_RATE, PERIODS_PER_YEAR)
+# mv_metrics = calculate_metrics(mv_curve, RISK_FREE_RATE, PERIODS_PER_YEAR)
 
 result_df = pd.DataFrame(
     {
         "Buy_and_Hold": bh_metrics,
         "Equal_Weight": ew_metrics,
         "Best_Stock": bs_metrics,
-        "Minimum_Variance": mv_metrics,
+        # "Minimum_Variance": mv_metrics,
     }
 ).T
 
 print("Best Stock（由训练集选出）:", best_ticker)
 print("Minimum Variance 权重（前10项）:")
-print(mv_target_weights.sort_values(ascending=False).head(10))
+# print(mv_target_weights.sort_values(ascending=False).head(10))
 print()
 print(result_df)
 print()
@@ -375,13 +375,13 @@ result_df.to_csv(os.path.join(output_dir, "baseline_metrics.csv"), encoding="utf
 bh_curve.to_csv(os.path.join(output_dir, "buy_and_hold_curve.csv"), encoding="utf-8-sig")
 ew_curve.to_csv(os.path.join(output_dir, "equal_weight_curve.csv"), encoding="utf-8-sig")
 bs_curve.to_csv(os.path.join(output_dir, "best_stock_curve.csv"), encoding="utf-8-sig")
-mv_curve.to_csv(os.path.join(output_dir, "minimum_variance_curve.csv"), encoding="utf-8-sig")
+# mv_curve.to_csv(os.path.join(output_dir, "minimum_variance_curve.csv"), encoding="utf-8-sig")
 
 bh_weights.to_csv(os.path.join(output_dir, "buy_and_hold_weights.csv"), encoding="utf-8-sig")
 ew_weights.to_csv(os.path.join(output_dir, "equal_weight_weights.csv"), encoding="utf-8-sig")
 bs_weights.to_csv(os.path.join(output_dir, "best_stock_weights.csv"), encoding="utf-8-sig")
-mv_weights.to_csv(os.path.join(output_dir, "minimum_variance_weights.csv"), encoding="utf-8-sig")
-mv_target_weights.to_csv(os.path.join(output_dir, "minimum_variance_target_weights.csv"), encoding="utf-8-sig")
+# mv_weights.to_csv(os.path.join(output_dir, "minimum_variance_weights.csv"), encoding="utf-8-sig")
+# mv_target_weights.to_csv(os.path.join(output_dir, "minimum_variance_target_weights.csv"), encoding="utf-8-sig")
 
 # 画资金曲线
 plt.rcParams.update({
@@ -417,7 +417,7 @@ ax.plot(
 ax.plot(
     ew_curve.index,
     ew_curve.values,
-    color="#55A868",
+    color="#562626",
     label="Equal Weight",
     zorder=3,
 )
@@ -428,13 +428,13 @@ ax.plot(
     label=f"Best Stock ({best_ticker})",
     zorder=3,
 )
-ax.plot(
-    mv_curve.index,
-    mv_curve.values,
-    color="#562626",
-    label="Minimum Variance",
-    zorder=3,
-)
+# ax.plot(
+#     mv_curve.index,
+#     mv_curve.values,
+#     color="#55A868",
+#     label="Minimum Variance",
+#     zorder=3,
+# )
 
 ax.set_title("Baseline Portfolio Value Comparison", pad=10)
 ax.set_xlabel("Date")
